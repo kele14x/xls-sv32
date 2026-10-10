@@ -16,9 +16,9 @@ xls-sv32/
 ├── README.md                    # Project overview and commands
 ├── .gitignore                   # Local tools, builds, and caches
 ├── bin/                         # Executable launchers (tracked)
-│   ├── xls                      # XLS tool launcher (macOS or Linux)
-│   ├── sta                      # OpenSTA launcher (macOS or Linux)
-│   ├── yosys                    # Slang-enabled Yosys launcher (macOS or Linux)
+│   ├── xls                      # Linux XLS tool launcher
+│   ├── sta                      # Linux OpenSTA launcher
+│   ├── yosys                    # Linux Slang-enabled Yosys launcher
 │   └── run-smoke-test.sh        # Smoke-test launcher
 ├── config/
 │   └── tools/                   # Pinned installation manifests (tracked)
@@ -66,8 +66,9 @@ fixtures can still be versioned.
 
 ## Install the toolchain
 
-The binary XLS release pinned in `config/tools/xls-install.json` is installed
-locally; no Bazel or source build is required. On Linux x64:
+The supported host platform is Linux x64. The binary XLS release pinned in
+`config/tools/xls-install.json` is installed locally; no Bazel or source build
+is required:
 
 ```bash
 ./scripts/install-xls.sh
@@ -75,14 +76,10 @@ locally; no Bazel or source build is required. On Linux x64:
 
 The script downloads the archive into `downloads/`, checks it against the
 published SHA-256 digest, extracts it under `tools/`, and points the
-`tools/xls` symlink at it. On macOS, run it inside the shared OrbStack VM:
+`tools/xls` symlink at it.
 
-```bash
-orb -m ubuntu24 -w "$PWD" ./scripts/install-xls.sh
-```
-
-`bin/xls` launches any XLS executable and, on macOS, forwards the command
-into the VM. Relative paths resolve from the project root:
+`bin/xls` launches any installed XLS executable directly. Relative paths
+resolve from the project root:
 
 ```bash
 ./bin/xls interpreter_main --version
@@ -118,12 +115,6 @@ The quicker smoke test skips simulation and only checks the XLS flow:
 
 ```bash
 ./bin/run-smoke-test.sh
-```
-
-On another OrbStack VM, set `XLS_VM`:
-
-```bash
-XLS_VM=ubuntu24 ./bin/run-smoke-test.sh
 ```
 
 ## The core in one function

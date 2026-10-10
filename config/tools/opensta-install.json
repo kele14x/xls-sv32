@@ -1,49 +1,53 @@
 {
-  "repository": "https://github.com/The-OpenROAD-Project/OpenSTA",
+  "repository": "https://github.com/parallaxsw/OpenSTA",
   "version": "3.1.0",
-  "commit": "d1e43c6f9f4e66cb59c3d7958a4aa7d1626b4614",
-  "commit_date": "2026-09-28T22:31:51Z",
+  "commit": "7b261909c1730d963252142e136daaa0199e333c",
+  "commit_date": "2026-10-09T21:38:35Z",
   "variant": "upstream",
   "platform": "linux-x64",
-  "archive": "opensta-3.1.0-gd1e43c6f9f4e-source.tar.gz",
-  "download_url": "https://codeload.github.com/The-OpenROAD-Project/OpenSTA/tar.gz/d1e43c6f9f4e66cb59c3d7958a4aa7d1626b4614",
-  "archive_size_bytes": 95388901,
-  "sha256": "bd0ca21b8d7f99862e8305c144b5d20117dcc20dd67198a5789878ddcb5054f9",
+  "archive": "opensta-3.1.0-g7b261909c173-source.tar.gz",
+  "download_url": "https://codeload.github.com/parallaxsw/OpenSTA/tar.gz/7b261909c1730d963252142e136daaa0199e333c",
+  "archive_size_bytes": 13482226,
+  "sha256": "db989e6caeeca5c9f8b857f9b9577f49f96d428e0281cfb57d76045dcf1eb375",
   "patches": [],
-  "installed_directory": "tools/opensta-3.1.0-gd1e43c6f9f4e-linux-x64",
+  "installed_directory": "tools/opensta-3.1.0-g7b261909c173-linux-x64",
   "source_directory": "build/tools/opensta/source",
   "build_directory": "build/tools/opensta/build",
   "binary": "tools/opensta/sta",
-  "binary_sha256": "1a73a323e2cb7bf1ad2b95ef281e0665ff67396807559eb21957abc39a205f95",
-  "default_vm": "ubuntu24",
+  "binary_sha256": "8fd14c868f550628c27b33d19a157b335a0a07d21831aebe9dd72bb55d376e98",
   "build_dependencies": {
-    "apt": [
-      "cmake",
-      "g++",
-      "make",
-      "git",
-      "bison",
-      "flex",
-      "swig",
-      "tcl8.6-dev",
-      "zlib1g-dev",
-      "libeigen3-dev"
-    ],
+    "homebrew": {
+      "cmake": "4.4.4",
+      "bison": "3.8.2",
+      "flex": "2.6.4_2",
+      "swig": "4.5.1",
+      "eigen": "5.0.1",
+      "tcl-tk@8": "8.6.18",
+      "mht208/formal/cudd": "3.0.0"
+    },
+    "compiler": {
+      "executable": "/usr/bin/c++",
+      "version": "GCC 15.2.0",
+      "standard": "C++20"
+    },
     "cudd": {
-      "repository": "https://github.com/cuddorg/cudd",
+      "formula": "mht208/formal/cudd",
       "version": "3.0.0",
-      "commit": "f54f533303640afd5dbe47a05ebeabb3066f2a25",
-      "archive": "cudd-3.0.0-gf54f53330364-source.tar.gz",
-      "archive_size_bytes": 1169539,
-      "sha256": "b8b7c8ec3bfb8c7200639eba0da1293c672259a4812c7aeca5152d88151e67ca",
-      "archive_method": "git archive --format=tar.gz --prefix=cudd-3.0.0-gf54f53330364/ f54f533303640afd5dbe47a05ebeabb3066f2a25",
-      "source_directory": "build/tools/cudd/source",
+      "repository": "https://github.com/ivmai/cudd",
+      "download_url": "https://github.com/ivmai/cudd/archive/cudd-3.0.0.tar.gz",
+      "sha256": "5fe145041c594689e6e7cf4cd623d5f2b7c36261708be8c9a72aed72cf67acce",
       "linkage": "static"
     }
   },
   "cmake_options": {
     "CMAKE_BUILD_TYPE": "Release",
     "USE_TCL_READLINE": false,
-    "BUILD_TESTS": false
+    "CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE": true,
+    "CMAKE_PREFIX_PATH": "/home/linuxbrew/.linuxbrew/opt/eigen",
+    "CUDD_DIR": "/home/linuxbrew/.linuxbrew/opt/cudd",
+    "CUDD_LIB": "/home/linuxbrew/.linuxbrew/opt/cudd/lib/libcudd.a",
+    "CUDD_HEADER": "/home/linuxbrew/.linuxbrew/opt/cudd/include/cudd.h",
+    "TCL_LIBRARY": "/home/linuxbrew/.linuxbrew/opt/tcl-tk@8/lib/libtcl8.6.so",
+    "TCL_HEADER": "/home/linuxbrew/.linuxbrew/opt/tcl-tk@8/include/tcl-tk/tcl.h"
   }
 }

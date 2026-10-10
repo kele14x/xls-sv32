@@ -9,7 +9,4 @@ if [[ ! -x "$tool" ]]; then
 fi
 cd "$project_dir"
 
-if [[ "$(uname -s)" == Darwin ]]; then
-    exec orb -m "${YOSYS_VM:-ubuntu24}" -w "$project_dir" "$tool" "$@"
-fi
 exec "$tool" "$@"

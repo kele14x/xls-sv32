@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Download and install the pinned XLS toolchain described by
-# config/tools/xls-install.json. Intended for Linux x64; on macOS run it
-# inside the shared OrbStack VM.
+# config/tools/xls-install.json. Intended for Linux x64.
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"

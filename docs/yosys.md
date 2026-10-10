@@ -1,14 +1,14 @@
 # Yosys toolchain
 
-The project uses an unmodified Yosys 0.69 source release built in the
-`ubuntu24` OrbStack VM, with the bundled sv-elab/slang frontend and ABC
+The project uses an unmodified Yosys 0.69 source release built for Linux x64,
+with the bundled sv-elab/slang frontend and ABC
 enabled. `config/tools/yosys-install.json` pins the source archive checksum,
 source and dependency revisions, build options, and installed binary checksums.
 
-`bin/yosys` runs `tools/yosys/bin/yosys` through the VM on macOS and directly
-on Linux. `tools/yosys` points to `yosys-0.69-linux-x64`. The installation
+`bin/yosys` runs `tools/yosys/bin/yosys` directly.
+`tools/yosys` points to `yosys-0.69-linux-x64`. The installation
 includes ABC and Yosys's runtime data files; it does not depend on the
-disposable source/build directories. Set `YOSYS_VM` to select another VM.
+disposable source/build directories.
 
 ```bash
 ./bin/yosys -V
@@ -29,7 +29,7 @@ Use `read_slang` explicitly for comprehensive SystemVerilog support:
 ./bin/yosys -p 'read_slang --top my_top design.sv; synth -top my_top; check -assert'
 ```
 
-Homebrew's Yosys installation is independent. Project scripts invoke the
+Other Yosys installations are independent. Project scripts invoke the
 local launcher explicitly and do not resolve Yosys through `PATH`.
 Historical PPA reports retain the tool/frontend provenance of their original
 runs; changing the frontend can change optimization, naming, and PPA results.
@@ -50,7 +50,7 @@ currently validated with Icarus Verilog against a Python reference model.
 
 ## Rebuild in Ubuntu 24.04
 
-Run from the project root inside `ubuntu24`. The official release archive
+Run from the project root on Ubuntu 24.04. The official release archive
 contains Yosys, ABC, sv-elab, slang, and the other bundled libraries.
 
 ```bash

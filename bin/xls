@@ -20,8 +20,4 @@ case "$tool" in
         ;;
 esac
 
-if [[ "$(uname -s)" == Darwin ]]; then
-    exec orb -m "${XLS_VM:-ubuntu24}" -w "$project_dir" \
-        "$project_dir/tools/xls/$tool" "$@"
-fi
 exec "$project_dir/tools/xls/$tool" "$@"
