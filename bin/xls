@@ -4,7 +4,7 @@ set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 if [[ $# -lt 1 ]]; then
     echo "Usage: $0 <XLS tool> [arguments...]" >&2
-    echo "Example: $0 interpreter_main --dslx_path=src/riscv_core tests/riscv_core/riscv_core_test.x" >&2
+    echo "Example: $0 interpreter_main --dslx_path=src/sv32 tests/sv32/sv32_test.x" >&2
     exit 2
 fi
 tool="$1"

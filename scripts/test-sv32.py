@@ -3,7 +3,7 @@
 
 The generated testbench loads `imem.hex`/`dmem.hex`, runs until the core
 halts, and dumps its register file and data memory. This script compares that
-dump against the Python reference model in tests/riscv_core/rv32_ref.py.
+dump against the Python reference model in tests/sv32/sv32_ref.py.
 """
 
 import argparse
@@ -13,8 +13,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "tests" / "riscv_core"))
-import rv32_ref
+sys.path.insert(0, str(ROOT / "tests" / "sv32"))
+import sv32_ref
 
 
 def testbench(imem_words, dmem_words, max_cycles):
@@ -40,7 +40,7 @@ module tb;
   reg [31:0] imem [0:IMEM_WORDS-1];
   reg [31:0] dmem [0:DMEM_WORDS-1];
 
-  riscv_top dut (
+  sv32_top dut (
       .clk(clk), .rst_n(rst_n),
       .imem_addr(imem_addr), .imem_rdata(imem_rdata),
       .dmem_addr(dmem_addr), .dmem_wdata(dmem_wdata),
@@ -120,16 +120,16 @@ def main():
     else:
         if not args.skip_dslx:
             subprocess.run([str(ROOT / "bin/xls"), "interpreter_main",
-                            "--dslx_path=" + str(ROOT / "src" / "riscv_core"),
+                            "--dslx_path=" + str(ROOT / "src" / "sv32"),
                             "--compare=jit", "--lower_to_ir=true",
                             "--convert_tests=true", "--seed=42",
-                            str(ROOT / "tests" / "riscv_core" / "riscv_core_test.x")],
+                            str(ROOT / "tests" / "sv32" / "sv32_test.x")],
                            cwd=ROOT, check=True, timeout=600)
-        subprocess.run([sys.executable, str(ROOT / "scripts" / "build-riscv.py")],
+        subprocess.run([sys.executable, str(ROOT / "scripts" / "build-sv32.py")],
                        cwd=ROOT, check=True, timeout=1800)
-        output = ROOT / "build" / "riscv_core"
+        output = ROOT / "build" / "sv32"
 
-    imem, dmem_init, dmem_words = rv32_ref.demo_program()
+    imem, dmem_init, dmem_words = sv32_ref.demo_program()
     imem_words = 1
     while imem_words < len(imem):
         imem_words <<= 1
@@ -139,7 +139,7 @@ def main():
 
     print("Compiling RTL with Icarus Verilog", flush=True)
     subprocess.run(["iverilog", "-g2012", "-s", "tb", "-o", output / "sim.vvp",
-                    output / "riscv_core.v", output / "riscv_top.sv", output / "tb.sv"],
+                    output / "sv32_core.v", output / "sv32_top.sv", output / "tb.sv"],
                    cwd=ROOT, check=True, timeout=1800)
     print("Simulating", flush=True)
     result = subprocess.run(["vvp", "sim.vvp"], cwd=output, check=True,
@@ -149,7 +149,7 @@ def main():
         raise SystemExit("simulation did not report a halt\n" + result.stdout)
 
     expected_regs, expected_pc, expected_mem, expected_cycles, expected_halt = \
-        rv32_ref.run(imem, dmem_init, dmem_words)
+        sv32_ref.run(imem, dmem_init, dmem_words)
     errors = []
     for index in range(32):
         actual = registers.get(index)

@@ -1,6 +1,6 @@
 """RV32I reference model, instruction encoders, and demo programs.
 
-The reference model mirrors the semantics of `src/riscv_core/riscv_core.x`
+The reference model mirrors the semantics of `src/sv32/sv32.x`
 exactly: little-endian byte-addressed data memory with word-granular reads
 and byte strobes, wrap-around word indexing, and halt on ECALL/EBREAK.
 """
@@ -257,7 +257,7 @@ def run(imem, dmem_init, dmem_words=256, max_cycles=100000):
 
 
 # ---------------------------------------------------------------------------
-# Demo program used by scripts/test-riscv.py
+# Demo program used by scripts/test-sv32.py
 # ---------------------------------------------------------------------------
 
 def demo_program():

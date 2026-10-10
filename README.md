@@ -1,13 +1,13 @@
 # XLS SV32
 
-An [RV32I](https://riscv.org/) core implemented in DSLX and built with the
-official [Google XLS](https://github.com/google/xls) toolchain. This
+SV32 is an [RV32I](https://riscv.org/) core implemented in DSLX and built
+with the official [Google XLS](https://github.com/google/xls) toolchain. This
 repository is a testbed for using XLS on real RTL: DSLX is type-checked and
 simulated with the XLS interpreter and LLVM JIT, lowered to optimized IR,
 emitted as Verilog, wrapped in a clocked SystemVerilog shell, and simulated
 with Icarus Verilog against an independent Python reference model.
 
-The design is documented in [docs/riscv-core.md](docs/riscv-core.md).
+The design is documented in [docs/sv32.md](docs/sv32.md).
 
 ## Folder structure
 
@@ -27,29 +27,29 @@ xls-sv32/
 │       ├── yosys-install.json
 │       └── nangate45-install.json
 ├── src/
-│   └── riscv_core/
-│       └── riscv_core.x         # Pure RV32I state-transition function
+│   └── sv32/
+│       └── sv32.x               # Pure RV32I state-transition function
 ├── tests/
-│   ├── riscv_core/
-│   │   ├── riscv_core_test.x    # DSLX unit tests for every instruction class
-│   │   └── rv32_ref.py          # Assembler and reference interpreter
+│   ├── sv32/
+│   │   ├── sv32_test.x          # DSLX unit tests for every instruction class
+│   │   └── sv32_ref.py          # Assembler and reference interpreter
 │   └── tools/
 │       └── test_opensta_activity.py
 ├── scripts/
 │   ├── install-xls.sh           # Download/verify the pinned XLS release
-│   ├── build-riscv.py           # DSLX -> IR -> RTL -> clocked wrapper
-│   ├── test-riscv.py            # DSLX/JIT tests plus RTL-vs-reference simulation
+│   ├── build-sv32.py            # DSLX -> IR -> RTL -> clocked wrapper
+│   ├── test-sv32.py             # DSLX/JIT tests plus RTL-vs-reference simulation
 │   └── smoke-test.sh            # Toolchain smoke test
 ├── docs/
-│   ├── riscv-core.md            # Interface, ISA coverage, and verification
+│   ├── sv32.md                  # Interface, ISA coverage, and verification
 │   ├── opensta.md               # Pinned analyzer and rebuild instructions
 │   └── yosys.md                 # Pinned synthesis flow
 ├── build/                       # Generated artifacts (ignored)
-│   └── riscv_core/
-│       ├── riscv.ir / riscv.opt.ir
-│       ├── riscv_core.v         # Combinational datapath
-│       ├── riscv_core.sig.textproto
-│       ├── riscv_top.sv         # Registered wrapper
+│   └── sv32/
+│       ├── sv32.ir / sv32.opt.ir
+│       ├── sv32_core.v          # Combinational datapath
+│       ├── sv32_core.sig.textproto
+│       ├── sv32_top.sv          # Registered wrapper
 │       ├── imem.hex / dmem.hex / tb.sv / sim.vvp
 │       └── config.json
 ├── tools/                       # Installed tools (ignored)
@@ -86,32 +86,32 @@ into the VM. Relative paths resolve from the project root:
 
 ```bash
 ./bin/xls interpreter_main --version
-./bin/xls interpreter_main --dslx_path=src/riscv_core \
-    tests/riscv_core/riscv_core_test.x
+./bin/xls interpreter_main --dslx_path=src/sv32 \
+    tests/sv32/sv32_test.x
 ```
 
 ## Generate and test the core
 
 ```bash
-python3 scripts/build-riscv.py     # DSLX -> IR -> RTL + wrapper
-python3 scripts/test-riscv.py      # DSLX tests, RTL build, and simulation
+python3 scripts/build-sv32.py     # DSLX -> IR -> RTL + wrapper
+python3 scripts/test-sv32.py      # DSLX tests, RTL build, and simulation
 ```
 
-`test-riscv.py`:
+`test-sv32.py`:
 
 1. Runs the DSLX unit tests with the interpreter and compares results with
    the LLVM JIT (17 tests across ALU, branches, jumps, loads, and stores).
 2. Converts `step` to XLS IR, optimizes it, and emits combinational Verilog
    plus a module signature.
-3. Generates `riscv_top.sv`, which registers the architectural state and
+3. Generates `sv32_top.sv`, which registers the architectural state and
    exposes Harvard instruction/data memory ports.
 4. Writes a demo program, simulates the RTL with Icarus Verilog, and compares
-   every register and data-memory word against `tests/riscv_core/rv32_ref.py`.
+   every register and data-memory word against `tests/sv32/sv32_ref.py`.
 
 To simulate an existing build without rerunning the DSLX checks:
 
 ```bash
-python3 scripts/test-riscv.py --simulate-only build/riscv_core
+python3 scripts/test-sv32.py --simulate-only build/sv32
 ```
 
 The quicker smoke test skips simulation and only checks the XLS flow:
@@ -128,8 +128,8 @@ XLS_VM=ubuntu24 ./bin/run-smoke-test.sh
 
 ## The core in one function
 
-`src/riscv_core/riscv_core.x` is a pure function. XLS codegen turns it into
-combinational logic, and `scripts/build-riscv.py` adds the state register:
+`src/sv32/sv32.x` is a pure function. XLS codegen turns it into
+combinational logic, and `scripts/build-sv32.py` adds the state register:
 
 ```text
 step(state, imem_rdata, dmem_rdata) -> (state', dmem_req, halt)
@@ -145,7 +145,7 @@ step(state, imem_rdata, dmem_rdata) -> (state', dmem_req, halt)
 The wrapper registers `state` and freezes it when `halt` is asserted, so
 `ECALL`/`EBREAK` cleanly stop the program. The build script parses the module
 signature and computes the packed-field offsets, so it adapts if the design
-changes. See [docs/riscv-core.md](docs/riscv-core.md) for the port table, ISA
+changes. See [docs/sv32.md](docs/sv32.md) for the port table, ISA
 coverage, memory model, and verification details.
 
 ## Toolchain notes
