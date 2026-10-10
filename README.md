@@ -1,4 +1,4 @@
-# XLS RISC-V
+# XLS SV32
 
 An [RV32I](https://riscv.org/) core implemented in DSLX and built with the
 official [Google XLS](https://github.com/google/xls) toolchain. This
@@ -12,7 +12,7 @@ The design is documented in [docs/riscv-core.md](docs/riscv-core.md).
 ## Folder structure
 
 ```text
-xls-riscv/
+xls-sv32/
 ├── README.md                    # Project overview and commands
 ├── .gitignore                   # Local tools, builds, and caches
 ├── bin/                         # Executable launchers (tracked)
