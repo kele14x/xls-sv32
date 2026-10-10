@@ -1,10 +1,13 @@
 # Known issues
 
-Recorded during the initial SV32 review on 2026-10-10. All five issues below
-remain open; this document records the findings without changing the core.
+Recorded during the initial SV32 review on 2026-10-10. The original five
+core/build issues remain open. A tooling review on the same date added three
+installation issues below. This document records findings without applying
+implementation fixes.
 
 P1 issues affect valid RV32I instructions. P2 issues affect reset behavior,
-the documented illegal-instruction halt policy, or build configuration.
+the documented illegal-instruction halt policy, build configuration, or
+toolchain installation.
 
 ## 1. [P1] Halfword stores corrupt memory at byte offset 2
 
@@ -146,3 +149,84 @@ module name.
 
 The passing baseline demonstrates that the current tests do not cover these
 failures. No core fixes were applied as part of this review.
+
+## Tooling review on 2026-10-10
+
+### 6. [P2] An incomplete XLS installation can replace a working tool link
+
+**Location:** [scripts/install-xls.sh](scripts/install-xls.sh), lines 29–38.
+
+The installer treats the existence of the versioned directory as proof of a
+complete installation. An interrupted extraction can leave that directory
+present with missing executables. A subsequent run skips extraction and
+changes `tools/xls` before validating the interpreter. The version check then
+fails, leaving the default launcher pointing at the incomplete installation,
+even if it previously pointed at a working version.
+
+**Reproduction:** In an isolated project fixture, provide a valid,
+checksum-matching release archive, an existing working `tools/xls` symlink,
+and an empty directory at the manifest's `installed_directory`. The installer
+skips extraction, replaces the working symlink, and exits 2 with
+`XLS tool not found: interpreter_main`. Removing the incomplete directory
+allows the same archive to install successfully.
+
+**Suggested fix:** Extract into a staging directory and validate the expected
+executables and standard library before publishing the versioned installation
+and switching the default symlink. Detect and repair incomplete existing
+directories while preserving a working default installation on failure.
+
+### 7. [P2] An interrupted XLS download prevents later installer retries
+
+**Location:** [scripts/install-xls.sh](scripts/install-xls.sh), lines 23–27.
+
+`curl` writes directly to the final cached archive filename. An interrupted
+download can leave a partial file behind. On subsequent runs, the installer
+sees the file and skips downloading; checksum verification fails every time
+until the user manually removes the cached file. The same problem affects an
+otherwise corrupted cached archive.
+
+**Reproduction:** In an isolated fixture, a downloader writes a partial
+archive and exits 18. Enable successful downloading and rerun the installer.
+The second run fails SHA-256 verification without calling the downloader.
+Deleting the partial archive permits a successful retry.
+
+**Suggested fix:** Download to a temporary filename, verify its checksum, and
+rename it into the cache only after verification. Detect invalid existing cache
+entries and redownload them rather than permanently blocking retries.
+
+### 8. [P2] Nangate45 installation leaves an existing default link unchanged
+
+**Location:** [docs/opensta.md](docs/opensta.md), lines 120–122, the library
+installation recipe.
+
+The recipe verifies the downloaded library and copies it into the versioned
+directory, but creates `tools/nangate45` only if no file or symlink exists
+there. If the default link points at an older library, it remains unchanged.
+A dangling symlink is also left unrepaired. Tests and future timing/power
+flows read through this default link, so the active library can differ from
+the verified installation and manifest.
+
+**Reproduction:** Run the exact documentation snippet in an isolated fixture
+with `tools/nangate45` pointing at an older library and the manifest describing
+a new versioned directory. The snippet succeeds and writes the verified new
+library, but reading the manifest's `library_path` still returns the old
+library. No upstream download or workspace tool modification is needed for
+this reproduction.
+
+**Suggested fix:** Refresh the default symlink to the verified versioned
+directory and verify the checksum through `library_path` after the switch.
+Handle an existing regular file or directory explicitly instead of silently
+leaving it active.
+
+### Tooling validation
+
+- XLS, OpenSTA, and Yosys version commands succeed in the current workspace.
+- All three cached source/release archive checksums match their manifests.
+- Installed OpenSTA, Yosys, ABC, and Nangate45 checksums match their manifests.
+- XLS, OpenSTA, Yosys, and ABC have no unresolved shared libraries.
+- Both OpenSTA activity tests pass, including all four gated-clock cases.
+- The three installation findings were reproduced in temporary fixtures;
+  the workspace's installed tools and symlinks were left intact.
+
+The current installations are healthy. These findings concern recovery from
+interrupted setup and refreshing the default verification-library link.

@@ -16,23 +16,12 @@
   "systemverilog_frontend": "read_slang",
   "build_dependencies": {
     "apt": [
-      "cmake",
       "g++",
       "make",
-      "ninja-build",
-      "git",
       "python3",
-      "bison",
-      "flex",
-      "gawk",
+      "pkg-config",
       "libffi-dev",
-      "libreadline-dev",
-      "tcl-dev",
-      "zlib1g-dev",
-      "libboost-dev",
-      "libfmt-dev",
-      "libtommath-dev",
-      "libtomlplusplus-dev"
+      "zlib1g-dev"
     ],
     "submodules": {
       "abc": "a51bf4a7bb38ce06ea3a544b1463b40832213917",
@@ -44,7 +33,22 @@
       "libs/symfpu": "5d5e50867437fe5cabd6ab5aad3b3808ec86701f",
       "libs/tomlplusplus": "a43ad3787293f4a46b1d70c0924b5a25d10e79fc"
     },
-    "slang_version": "11.0.0"
+    "slang_version": "11.0.0",
+    "homebrew": {
+      "cmake": "4.4.4",
+      "bison": "3.8.2",
+      "flex": "2.6.4_2",
+      "readline": "8.3.6",
+      "ncurses": "6.6",
+      "tcl-tk@8": "8.6.18",
+      "libtommath": "1.3.0"
+    },
+    "compiler": {
+      "c_executable": "/usr/bin/cc",
+      "cxx_executable": "/usr/bin/c++",
+      "version": "GCC 15.2.0",
+      "standard": "C++20"
+    }
   },
   "cmake_options": {
     "CMAKE_BUILD_TYPE": "Release",
@@ -54,9 +58,22 @@
     "YOSYS_SLANG_REVISION": "b4fd362f4c53dc8ffab6946b9f866a6ea89e366d",
     "SLANG_REVISION": "e222e7dc0250231312f14c37d47404a49df00fe2",
     "CMAKE_DISABLE_FIND_PACKAGE_Git": true,
-    "YOSYS_CHECKOUT_INFO": "143eb14f9cc55d6f8927e68523b0c9d2166ed02c"
+    "YOSYS_CHECKOUT_INFO": "143eb14f9cc55d6f8927e68523b0c9d2166ed02c",
+    "CMAKE_C_COMPILER": "/usr/bin/cc",
+    "CMAKE_CXX_COMPILER": "/usr/bin/c++",
+    "Python3_EXECUTABLE": "/usr/bin/python3",
+    "Python_EXECUTABLE": "/usr/bin/python3",
+    "YOSYS_USE_BUNDLED_LIBS": true,
+    "YOSYS_ENABLE_UNIT_TESTS": false,
+    "YOSYS_WITH_PYTHON": false,
+    "CMAKE_INSTALL_RPATH": "/home/linuxbrew/.linuxbrew/opt/readline/lib;/home/linuxbrew/.linuxbrew/opt/ncurses/lib;/home/linuxbrew/.linuxbrew/opt/tcl-tk@8/lib"
   },
-  "binary_sha256": "9382f6a45fa06949f474e24a27e0b315b7830feb305350abc689355120a58819",
-  "abc_binary_sha256": "daebbee0508097d04ccb8d49baa1b87707b1bb6a8f846c37b07b8b45a15f1bce",
-  "runtime_data_directory": "tools/yosys/share/yosys"
+  "binary_sha256": "c929d06999893d926904f00c74bd43f2ff1a047f75a131140af3d1e9baab015d",
+  "abc_binary_sha256": "8858877f6f0ea6f41bba0c59d5fb07a3fe4352095febbbb81073088d3aaed848",
+  "runtime_data_directory": "tools/yosys/share/yosys",
+  "cmake_generator": "Unix Makefiles",
+  "build_environment": {
+    "PKG_CONFIG_PATH": "/home/linuxbrew/.linuxbrew/opt/readline/lib/pkgconfig:/home/linuxbrew/.linuxbrew/opt/tcl-tk@8/lib/pkgconfig:/home/linuxbrew/.linuxbrew/opt/libtommath/lib/pkgconfig:/home/linuxbrew/.linuxbrew/opt/ncurses/lib/pkgconfig",
+    "CPATH": "/home/linuxbrew/.linuxbrew/opt/readline/include"
+  }
 }
