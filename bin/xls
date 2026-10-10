@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+if [[ $# -lt 1 ]]; then
+    echo "Usage: $0 <XLS tool> [arguments...]" >&2
+    echo "Example: $0 interpreter_main --dslx_path=src/riscv_core tests/riscv_core/riscv_core_test.x" >&2
+    exit 2
+fi
+tool="$1"
+shift
+if [[ "$tool" == */* || ! -x "$project_dir/tools/xls/$tool" ]]; then
+    echo "XLS tool not found: $tool" >&2
+    exit 2
+fi
+cd "$project_dir"
+case "$tool" in
+    interpreter_main|ir_converter_main)
+        set -- "--dslx_stdlib_path=$project_dir/tools/xls/xls/dslx/stdlib" "$@"
+        ;;
+esac
+
+if [[ "$(uname -s)" == Darwin ]]; then
+    exec orb -m "${XLS_VM:-ubuntu24}" -w "$project_dir" \
+        "$project_dir/tools/xls/$tool" "$@"
+fi
+exec "$project_dir/tools/xls/$tool" "$@"

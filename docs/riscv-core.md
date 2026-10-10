@@ -1,0 +1,126 @@
+# RV32I core
+
+A single-cycle [RISC-V](https://riscv.org/) RV32I core written in DSLX. The
+design demonstrates the full XLS flow used by this project: type-checked
+DSLX, optimized IR, combinational Verilog, a clocked SystemVerilog wrapper,
+and RTL simulation checked against an independent Python model.
+
+## Modeling approach
+
+XLS DSLX functions are pure and combinational; a processor needs state and
+memory. The design splits the problem in two:
+
+- `src/riscv_core/riscv_core.x` contains `step`, a pure state-transition
+  function:
+  `step(state, imem_rdata, dmem_rdata) -> (state', dmem_req, halt)`.
+  It decodes one instruction, computes the next architectural state, and
+  emits a data-memory request.
+- `scripts/build-riscv.py` generates `riscv_top.sv`, which registers
+  `state` and connects combinational instruction and data memories.
+
+Because the data memory read is combinational and the architectural state is
+registered, a load completes in the same cycle: the load address depends only
+on the current state, and the returned data feeds the next state. There is no
+combinational loop, so the core stays a feed-forward XLS function that
+`codegen_main --generator=combinational` can emit directly.
+
+### State
+
+```text
+State    { regs: u32[32], pc: u32 }     // 32 x 32-bit registers, x0 tied to 0
+DMemReq  { addr: u32, wdata: u32, wstrb: u4 }
+```
+
+Tuple fields flatten most-significant-first in the generated module: `state`
+is 1056 bits with `pc` in `[31:0]` and `regs[i]` in `[32+32i +: 32]`, and
+`out` is 1125 bits. The build script parses the module signature and computes
+these offsets instead of hard-coding them.
+
+### Top-level ports (`riscv_top`)
+
+| Port | Direction | Width | Description |
+| --- | --- | --- | --- |
+| `clk`, `rst_n` | in | 1 | Clock and asynchronous active-low reset |
+| `imem_addr` | out | 32 | Instruction fetch byte address (`pc`) |
+| `imem_rdata` | in | 32 | Instruction word at `imem_addr` |
+| `dmem_addr` | out | 32 | Data address (word-aligned) |
+| `dmem_wdata` | out | 32 | Store data, shifted into the addressed byte lanes |
+| `dmem_wstrb` | out | 4 | Byte write strobes |
+| `dmem_rdata` | in | 32 | Data word at `dmem_addr` |
+| `halted` | out | 1 | High after ECALL/EBREAK or an illegal instruction |
+| `debug_pc` | out | 32 | Current PC (simulation/debug) |
+| `debug_regs` | out | 1024 | Current register file (simulation/debug) |
+
+Memories are Harvard-style and byte-addressed, with 32-bit word lines and
+little-endian byte lanes. Instruction memory is read-only. The wrapper freezes
+the state while `halted` is asserted.
+
+## Instruction support
+
+| Class | Instructions | Notes |
+| --- | --- | --- |
+| Upper immediate | `LUI`, `AUIPC` | Complete |
+| Jumps | `JAL`, `JALR` | Link writes `pc + 4`; `JALR` clears bit 0 |
+| Branches | `BEQ`, `BNE`, `BLT`, `BGE`, `BLTU`, `BGEU` | Signed and unsigned |
+| Loads | `LB`, `LH`, `LW`, `LBU`, `LHU` | Sign/zero extension; little-endian |
+| Stores | `SB`, `SH`, `SW` | Byte strobes; 16/32-bit writes |
+| Integer | `ADDI`, `SLTI`, `SLTIU`, `XORI`, `ORI`, `ANDI`, `SLLI`, `SRLI`, `SRAI` | Immediate arithmetic and shifts |
+| Register | `ADD`, `SUB`, `SLL`, `SLT`, `SLTU`, `XOR`, `SRL`, `SRA`, `OR`, `AND` | Complete base `OP` set |
+| System | `ECALL`, `EBREAK` | Halt the simulation |
+| Memory ordering | `FENCE` | No-op for this in-order core |
+
+Not implemented: CSR instructions (treated as NOPs), `MRET`/`WFI`, the `M`,
+`A`, `C`, `F`, and `D` extensions, misaligned accesses, and traps. See the
+header of `riscv_core.x` for the authoritative list.
+
+## Generate and test
+
+```bash
+python3 scripts/build-riscv.py     # DSLX -> IR -> RTL + wrapper
+python3 scripts/test-riscv.py      # DSLX tests, RTL build, and simulation
+```
+
+`test-riscv.py` runs the DSLX unit tests with the LLVM JIT, builds the RTL,
+then simulates a demo program with Icarus Verilog and compares every register
+and every data-memory word against `tests/riscv_core/rv32_ref.py`. To rebuild
+and simulate a previous build directory without rerunning the DSLX checks:
+
+```bash
+python3 scripts/test-riscv.py --simulate-only build/riscv_core
+```
+
+A faster toolchain smoke test (DSLX tests plus Verilog generation, no
+simulation) is available through `./bin/run-smoke-test.sh`.
+
+## Verification
+
+- `tests/riscv_core/riscv_core_test.x` exercises each instruction class by
+  calling `step` directly: 17 unit tests cover ALU results, sign extension,
+  branches, jumps and links, loads and stores, `x0`, `ECALL`/`EBREAK`, and
+  `FENCE`.
+- `tests/riscv_core/rv32_ref.py` is an independent interpreter written in
+  Python. It includes an assembler and a demo program that loops, stores,
+  reloads, performs byte accesses, and calls a subroutine.
+- `scripts/test-riscv.py` checks the generated hardware against that model
+  over all 32 registers and 256 data words.
+
+## Build artifacts
+
+Generated files live under `build/riscv_core/` and are ignored by Git:
+
+- `riscv.ir`, `riscv.opt.ir` — optimized XLS IR
+- `riscv_core.v` — combinational datapath from `codegen_main`
+- `riscv_core.sig.textproto` — module interface
+- `riscv_top.sv` — clocked wrapper with registered state
+- `imem.hex`, `dmem.hex`, `tb.sv`, `sim.vvp` — simulation inputs and binary
+- `config.json` — chosen configuration and module widths
+- `smoke-test.log` — output from the latest smoke test
+
+## Possible next steps
+
+- Pipelining with `codegen_main --generator=pipeline` to raise the clock
+  frequency.
+- CSR support so programs can read `cycle`/`instret` and use `MRET`.
+- A formal or constrained-random instruction-stream test generator.
+- Synthesis and power analysis with the pinned Yosys, OpenSTA, and Nangate45
+  tools (manifests and launchers are already in the repository).
