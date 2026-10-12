@@ -4,10 +4,12 @@ SV32 is an [RV32I](https://riscv.org/) core implemented in DSLX and built
 with the official [Google XLS](https://github.com/google/xls) toolchain. This
 repository is a testbed for using XLS on real RTL: DSLX is type-checked and
 simulated with the XLS interpreter and LLVM JIT, lowered to optimized IR,
-emitted as Verilog, wrapped in a clocked SystemVerilog shell, and simulated
+emitted as a clocked Verilog core with explicit memory ports, and simulated
 with Icarus Verilog against an independent Python reference model.
 
 The design is documented in [docs/sv32.md](docs/sv32.md).
+The complete blinky SoC and DE25-NANO board flow are documented in
+[docs/soc.md](docs/soc.md).
 
 ## Folder structure
 
@@ -27,33 +29,43 @@ xls-sv32/
 │       ├── yosys-install.json
 │       └── nangate45-install.json
 ├── src/
-│   └── sv32/
-│       └── sv32.x               # Pure RV32I state-transition function
+│   ├── sv32/
+│   │   └── sv32.x               # Pure RV32I state-transition function
+│   └── sv32_soc/                # Synthesizable ROM, RAM, and LED SoC
+├── programs/
+│   └── blinky.py                # 13-instruction RV32I boot program
+├── boards/
+│   └── de25_nano/               # Board wrapper, pin/timing constraints, clock IP recipe
 ├── tests/
 │   ├── sv32/
 │   │   ├── sv32_test.x          # DSLX unit tests for every instruction class
 │   │   ├── sv32_ref.py          # Assembler and reference interpreter
 │   │   ├── sv32_cases.py        # Directed RTL programs and expected results
-│   │   └── test_build_sv32.py   # Default/custom module elaboration checks
+│   │   └── test_build_sv32.py   # Default/custom core and wrapper checks
+│   ├── sv32_soc/                # Memory, MMIO, blinky, and board-wrapper tests
 │   └── tools/
 │       ├── test_install_xls.py  # Offline installer recovery fixtures
 │       ├── test_nangate_install.py
 │       └── test_opensta_activity.py
 ├── scripts/
 │   ├── install-xls.sh           # Download/verify the pinned XLS release
-│   ├── build-sv32.py            # DSLX -> IR -> RTL -> clocked wrapper
+│   ├── build-sv32.py            # DSLX -> IR -> clocked core + wrapper
 │   ├── test-sv32.py             # DSLX/JIT tests plus RTL-vs-reference simulation
+│   ├── build-soc.py             # Core plus blinky ROM image
+│   ├── test-soc.py              # SoC RTL and synthesized-netlist checks
+│   ├── build-de25.py            # DE25-NANO Quartus project and 100 MHz build
 │   └── smoke-test.sh            # Toolchain smoke test
 ├── docs/
 │   ├── sv32.md                  # Interface, ISA coverage, and verification
+│   ├── soc.md                   # Memories, blinky, and DE25-NANO instructions
 │   ├── opensta.md               # Pinned analyzer and rebuild instructions
 │   └── yosys.md                 # Pinned synthesis flow
 ├── build/                       # Generated artifacts (ignored)
 │   └── sv32/
 │       ├── sv32.ir / sv32.opt.ir
-│       ├── sv32_core.v          # Combinational datapath
-│       ├── sv32_core.sig.textproto
-│       ├── sv32_top.sv          # Registered wrapper
+│       ├── sv32_core.v          # Clocked core + internal XLS datapath
+│       ├── sv32_core.sig.textproto  # Internal datapath signature
+│       ├── sv32_top.sv          # Compatibility wrapper
 │       ├── imem.hex / dmem.hex / tb.sv / sim.vvp
 │       └── config.json
 ├── tools/                       # Installed tools (ignored)
@@ -95,19 +107,20 @@ resolve from the project root:
 ## Generate and test the core
 
 ```bash
-python3 scripts/build-sv32.py     # DSLX -> IR -> RTL + wrapper
+python3 scripts/build-sv32.py     # DSLX -> IR -> clocked core + wrapper
 python3 scripts/test-sv32.py      # DSLX tests, RTL build, and simulation
-python3 -m unittest discover -s tests/sv32 -p 'test_*.py' -v  # Wrapper builds
+python3 -m unittest discover -s tests/sv32 -p 'test_*.py' -v  # Core/wrapper builds
 ```
 
 `test-sv32.py`:
 
 1. Runs the DSLX unit tests with the interpreter and compares results with
    the LLVM JIT (23 tests across ALU, branches, jumps, memory, and decoding).
-2. Converts `step` to XLS IR, optimizes it, and emits combinational Verilog
-   plus a module signature.
-3. Generates `sv32_top.sv`, which registers the architectural state and
-   exposes Harvard instruction/data memory ports.
+2. Converts `step` to XLS IR, optimizes it, and emits an internal combinational
+   datapath plus its module signature.
+3. Generates `sv32_core.v`, which registers the PC and register file and
+   exposes Harvard instruction/data memory ports. `sv32_top.sv` remains a
+   thin compatibility wrapper around the core.
 4. Simulates 35 programs with Icarus Verilog and compares every register,
    data-memory word, halt PC, and cycle count against `tests/sv32/sv32_ref.py`.
    Directed expectations also check reset writes, halfword lanes, shift counts,
@@ -132,28 +145,59 @@ python3 -m unittest discover -s tests/tools -p 'test_install_xls.py' -v
 python3 -m unittest discover -s tests/tools -p 'test_nangate_install.py' -v
 ```
 
+## Run the blinky SoC
+
+The synthesizable SoC contains 1 KiB of instruction ROM, 1 KiB of data RAM,
+and an LED register at `0x10000000`. The firmware keeps its blink counter in
+RAM and toggles the LED every 0.5 seconds at 100 MHz.
+
+```bash
+python3 scripts/build-soc.py              # Hardware ROM image and core
+python3 scripts/test-soc.py --synthesize  # Fast RTL, memory/MMIO, and gate tests
+python3 scripts/build-de25.py --compile  # DE25-NANO Quartus build (100 MHz)
+```
+
+The DE25-NANO project uses the board's 50 MHz oscillator, a generated 100 MHz
+PLL, configuration reset release, KEY0 reset, and active-low LED0. The Quartus
+project and `.sof` image are generated under `build/de25_nano/`. See
+[docs/soc.md](docs/soc.md) for the address map, waveform files, and programming
+instructions.
+
 ## The core in one function
 
-`src/sv32/sv32.x` is a pure function. XLS codegen turns it into
-combinational logic, and `scripts/build-sv32.py` adds the state register:
+`src/sv32/sv32.x` is a pure function. XLS codegen turns it into an internal
+combinational datapath, and `scripts/build-sv32.py` adds the PC and register file:
 
 ```text
 step(state, imem_rdata, dmem_rdata) -> (state', dmem_req, halt)
 ```
 
+The public `sv32_core` module uses the following interface:
+
 | Signal | Direction | Width | Purpose |
 | --- | --- | --- | --- |
-| `state` | in | 1056 | `pc` in `[31:0]`, 32 registers above it |
+| `clk`, `rst_n` | in | 1 | Rising-edge clock and asynchronous active-low reset |
+| `imem_addr` | out | 32 | Instruction fetch byte address |
 | `imem_rdata` | in | 32 | Instruction word at the current PC |
+| `dmem_addr` | out | 32 | Word-aligned data byte address |
+| `dmem_wdata` | out | 32 | Store data positioned in byte lanes |
+| `dmem_wstrb` | out | 4 | Byte write enables |
 | `dmem_rdata` | in | 32 | Data word at the emitted address |
-| `out` | out | 1125 | next state, data-memory request, and halt flag |
+| `halted` | out | 1 | Halt flag |
+| `debug_pc` | out | 32 | Current PC |
+| `debug_regs` | out | 1024 | Optional register-file observation |
 
-The wrapper registers `state` and freezes it when `halt` is asserted, so
+The core holds its PC and 32 registers internally and freezes them on halt, so
 `ECALL`/`EBREAK` and unsupported encodings stop without committing effects.
-Store strobes are suppressed during reset. The build script parses the module
-signature and computes the packed-field offsets, so it adapts if the design
-changes. See [docs/sv32.md](docs/sv32.md) for the port table, ISA
-coverage, memory model, and verification details.
+Store strobes are suppressed during reset. The `debug_regs` output can be left
+unconnected; register `xi` occupies `[32*i +: 32]`. Memories must provide
+combinational reads, with stores accepted at rising clock edges.
+
+The wide XLS `state` and `out` buses are private connections to
+`sv32_core_datapath`, which is included in the same Verilog file. The build
+script derives their packing from the signature. `sv32_top` exposes the same
+public ports for existing integrations. See [docs/sv32.md](docs/sv32.md) for
+ISA coverage, the memory model, and verification details.
 
 ## Toolchain notes
 

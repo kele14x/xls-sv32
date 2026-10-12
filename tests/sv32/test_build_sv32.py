@@ -1,4 +1,4 @@
-"""Verify generated wrappers elaborate with default and custom core names."""
+"""Verify clocked cores and compatibility wrappers for both module names."""
 
 import shutil
 import subprocess
@@ -22,11 +22,19 @@ class WrapperBuildTest(unittest.TestCase):
                         "--module-name", module, "--output-dir", str(output),
                     ], cwd=ROOT, text=True, capture_output=True, timeout=120)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    # The public .v core remains usable with Verilog-2005 tools.
                     result = subprocess.run([
-                        "iverilog", "-g2012", "-s", "sv32_top", "-o", str(output / "wrapper.vvp"),
-                        str(output / "sv32_core.v"), str(output / "sv32_top.sv"),
+                        "iverilog", "-g2005", "-s", module, "-o", str(output / "core.vvp"),
+                        str(output / "sv32_core.v"),
                     ], cwd=ROOT, text=True, capture_output=True, timeout=30)
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                    for top in (module, "sv32_top"):
+                        with self.subTest(top=top):
+                            result = subprocess.run([
+                                sys.executable, str(ROOT / "scripts/test-sv32.py"),
+                                "--simulate-only", str(output), "--top-module", top,
+                            ], cwd=ROOT, text=True, capture_output=True, timeout=120)
+                            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == "__main__":

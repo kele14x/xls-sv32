@@ -7,6 +7,7 @@ dump against the Python reference model in tests/sv32/sv32_ref.py.
 """
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -18,7 +19,7 @@ import sv32_ref
 import sv32_cases
 
 
-def testbench(imem_words, dmem_words, max_cycles):
+def testbench(imem_words, dmem_words, max_cycles, module):
     return f'''`timescale 1ns/1ps
 module tb;
   localparam IMEM_WORDS = {imem_words};
@@ -42,7 +43,7 @@ module tb;
   reg [31:0] dmem [0:DMEM_WORDS-1];
   reg [31:0] reset_dmem [0:DMEM_WORDS-1];
 
-  sv32_top dut (
+  {module} dut (
       .clk(clk), .rst_n(rst_n),
       .imem_addr(imem_addr), .imem_rdata(imem_rdata),
       .dmem_addr(dmem_addr), .dmem_wdata(dmem_wdata),
@@ -115,7 +116,7 @@ def parse_simulation(log):
     return registers, memory, halted, pc, cycles
 
 
-def simulate_program(output, core, program, max_cycles):
+def simulate_program(output, core, program, max_cycles, module):
     output.mkdir(parents=True, exist_ok=True)
     imem = program.instructions
     dmem_init = program.data
@@ -139,7 +140,7 @@ def simulate_program(output, core, program, max_cycles):
         imem_words <<= 1
     write_hex(output / "imem.hex", imem, imem_words)
     write_hex(output / "dmem.hex", dmem_init, dmem_words)
-    (output / "tb.sv").write_text(testbench(imem_words, dmem_words, max_cycles))
+    (output / "tb.sv").write_text(testbench(imem_words, dmem_words, max_cycles, module))
     subprocess.run(["iverilog", "-g2012", "-s", "tb", "-o", output / "sim.vvp",
                     core / "sv32_core.v", core / "sv32_top.sv", output / "tb.sv"],
                    cwd=ROOT, check=True, timeout=1800)
@@ -176,6 +177,8 @@ def main():
     parser.add_argument("--simulate-only", type=Path,
                         help="simulate an existing build directory")
     parser.add_argument("--max-cycles", type=int, default=2000)
+    parser.add_argument("--top-module",
+                        help="module under test (default: clocked core from config.json)")
     args = parser.parse_args()
     if args.max_cycles < 1:
         parser.error("--max-cycles must be positive")
@@ -197,11 +200,15 @@ def main():
                        cwd=ROOT, check=True, timeout=1800)
         output = ROOT / "build" / "sv32"
 
-    print("Compiling and simulating RTL regression programs", flush=True)
+    config_path = output / "config.json"
+    config = json.loads(config_path.read_text()) if config_path.exists() else {}
+    module = args.top_module or (config["core_module"] if config.get("interface") == "clocked_harvard"
+                                else "sv32_top")
+    print(f"Compiling and simulating {module} regression programs", flush=True)
     count = 0
     for program in sv32_cases.programs():
         case_output = output if program.name == "demo" else output / "cases" / program.name
-        simulate_program(case_output, output, program, args.max_cycles)
+        simulate_program(case_output, output, program, args.max_cycles, module)
         count += 1
     print(f"PASS: {count} RTL programs; all registers, data words, halt PCs, and cycles checked")
     print(f"Outputs in {output}")

@@ -1,0 +1,10 @@
+# Terasic DE25-NANO manual, Tables 3-6, 3-9, 3-10 (September 5, 2025).
+# https://mm.digikey.com/Volume0/opasdata/d220001/medias/docus/7704/P0804.pdf
+set_global_assignment -name FAMILY "Agilex 5"
+set_global_assignment -name DEVICE A5EB013BB23BE4SR1
+set_location_assignment PIN_V16 -to CLOCK1_50
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to CLOCK1_50
+set_location_assignment PIN_C8 -to KEY0_N
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to KEY0_N
+set_location_assignment PIN_DF35 -to LED0_N
+set_instance_assignment -name IO_STANDARD "1.1 V" -to LED0_N

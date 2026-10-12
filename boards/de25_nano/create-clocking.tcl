@@ -1,0 +1,23 @@
+# Generate the vendor PLL and configuration reset release for Agilex 5.
+package require qsys
+create_system sv32_clocking
+set_project_property DEVICE_FAMILY "Agilex 5"
+set_project_property DEVICE A5EB013BB23BE4SR1
+add_instance pll altera_iopll
+set_instance_parameter_value pll gui_reference_clock_frequency 50.0
+set_instance_parameter_value pll gui_output_clock_frequency0 100.0
+set_instance_parameter_value pll gui_number_of_clocks 1
+set_instance_parameter_value pll gui_use_locked true
+add_instance reset_release altera_s10_user_rst_clkgate
+set_instance_parameter_value reset_release outputType {Conduit Interface}
+add_interface ref_clk clock end
+set_interface_property ref_clk EXPORT_OF pll.refclk
+add_interface pll_reset reset end
+set_interface_property pll_reset EXPORT_OF pll.reset
+add_interface soc_clk clock start
+set_interface_property soc_clk EXPORT_OF pll.outclk0
+add_interface locked conduit end
+set_interface_property locked EXPORT_OF pll.locked
+add_interface config_reset conduit end
+set_interface_property config_reset EXPORT_OF reset_release.ninit_done
+save_system sv32_clocking.qsys

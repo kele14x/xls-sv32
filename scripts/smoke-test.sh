@@ -27,7 +27,7 @@ echo "Running the same tests using the IR interpreter"
     --run_quickcheck_when_interpreting=true --seed=42 \
     tests/sv32/sv32_test.x
 
-echo "Generating combinational RV32I RTL and the clocked wrapper"
+echo "Generating the clocked RV32I core and compatibility wrapper"
 python3 scripts/build-sv32.py
 test -s "$output_dir/sv32_core.v"
 test -s "$output_dir/sv32_top.sv"
