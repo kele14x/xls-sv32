@@ -10,12 +10,15 @@ with Icarus Verilog against an independent Python reference model.
 The design is documented in [docs/sv32.md](docs/sv32.md).
 The complete blinky SoC and DE25-NANO board flow are documented in
 [docs/soc.md](docs/soc.md).
+Current findings and the ordered roadmap, starting with the physical blinky
+test, are tracked in [TODO.md](TODO.md).
 
 ## Folder structure
 
 ```text
 xls-sv32/
 ├── README.md                    # Project overview and commands
+├── TODO.md                      # Findings and ordered core/SoC roadmap
 ├── .gitignore                   # Local tools, builds, and caches
 ├── bin/                         # Executable launchers (tracked)
 │   ├── xls                      # Linux XLS tool launcher
