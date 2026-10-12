@@ -1,9 +1,23 @@
 # Known issues
 
-Recorded during the initial SV32 review on 2026-10-10. The original five
-core/build issues remain open. A tooling review on the same date added three
-installation issues below. This document records findings without applying
-implementation fixes.
+All eight findings below were fixed on 2026-10-12. The reproductions and line
+numbers record the pre-fix code reviewed on 2026-10-10.
+
+| Issue | Resolution | Regression coverage |
+| --- | --- | --- |
+| 1. Halfword strobes | Select lanes `0011`/`1100` using the byte offset | DSLX lane checks and RTL store/load preservation |
+| 2. Register shifts | Use only the lowest five bits of `rs2` | DSLX and RTL counts 0, 31, 32, 33, and upper bits set |
+| 3. Reset stores | Gate exported write strobes with `rst_n` | RTL store at the reset vector with preloaded memory |
+| 4. Unsupported encodings | Validate fields before execution; halt without effects | 25 negative DSLX/RTL cases plus CSR/FENCE NOP checks |
+| 5. Custom module names | Instantiate the requested module in the wrapper | Default and custom builds elaborate with Icarus |
+| 6. Incomplete installations | Stage and validate executables/stdlib before publishing | Offline fixtures repair incomplete directories and preserve defaults on failure |
+| 7. Interrupted downloads | Verify temporary downloads; replace invalid cache entries | Offline interruption, checksum, corruption, and retry fixtures |
+| 8. Nangate45 links | Atomically refresh the symlink and verify the active library | Exact documentation recipe tested with fresh, stale, and dangling links |
+
+Validation: 23 DSLX/JIT and IR-interpreter tests, 35 RTL programs, default
+and custom wrapper builds, and 14 tooling tests all pass. The tooling tests
+include the existing OpenSTA activity checks. Test commands are listed in
+[README.md](README.md).
 
 P1 issues affect valid RV32I instructions. P2 issues affect reset behavior,
 the documented illegal-instruction halt policy, build configuration, or
@@ -147,8 +161,8 @@ module name.
 - Verilator lint of the default generated core and wrapper reported only
   unused-signal warnings.
 
-The passing baseline demonstrates that the current tests do not cover these
-failures. No core fixes were applied as part of this review.
+The passing review baseline demonstrated that the original tests did not
+cover these failures. The fixes and expanded tests are recorded above.
 
 ## Tooling review on 2026-10-10
 

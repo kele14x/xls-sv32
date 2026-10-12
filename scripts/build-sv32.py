@@ -159,7 +159,7 @@ module sv32_top (
   reg [STATE_WIDTH-1:0] state;
   wire [{out_width - 1}:0] out;
 
-  sv32_core core (
+  {module} core (
       .state(state),
       .imem_rdata(imem_rdata),
       .dmem_rdata(dmem_rdata),
@@ -170,7 +170,7 @@ module sv32_top (
   assign imem_addr = state[{pc_offset} +: {pc_width}];
   assign dmem_addr = out[{addr_offset} +: {addr_width}];
   assign dmem_wdata = out[{wdata_offset} +: {wdata_width}];
-  assign dmem_wstrb = out[{wstrb_offset} +: {wstrb_width}];
+  assign dmem_wstrb = rst_n ? out[{wstrb_offset} +: {wstrb_width}] : {wstrb_width}'b0;
   assign halted = out[{halt_offset}];
   assign debug_pc = state[{pc_offset} +: {pc_width}];
   assign debug_regs = state[{regs_offset} +: {regs_width}];

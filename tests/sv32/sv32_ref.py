@@ -1,8 +1,9 @@
 """RV32I reference model, instruction encoders, and demo programs.
 
-The reference model mirrors the semantics of `src/sv32/sv32.x`
-exactly: little-endian byte-addressed data memory with word-granular reads
-and byte strobes, wrap-around word indexing, and halt on ECALL/EBREAK.
+The interpreter implements RV32I with the project's memory and halt policy:
+little-endian byte-addressed data memory with word-granular reads and byte
+strobes, wrap-around word indexing, and halt on ECALL/EBREAK or unsupported
+encodings. CSR instructions and FENCE are NOPs.
 """
 
 MASK32 = 0xFFFFFFFF
@@ -136,7 +137,22 @@ def run(imem, dmem_init, dmem_words=256, max_cycles=100000):
         write_value = None
         write_dest = rd
 
-        if opcode == 0x33:  # OP
+        invalid = (
+            (opcode == 0x33 and (funct7, funct3) not in
+             {(0, f) for f in range(8)} | {(0x20, 0), (0x20, 5)}) or
+            (opcode == 0x13 and
+             ((funct3 == 1 and funct7 != 0) or
+              (funct3 == 5 and funct7 not in (0, 0x20)))) or
+            (opcode == 0x03 and funct3 not in (0, 1, 2, 4, 5)) or
+            (opcode == 0x23 and funct3 not in (0, 1, 2)) or
+            (opcode == 0x63 and funct3 not in (0, 1, 4, 5, 6, 7)) or
+            (opcode in (0x67, 0x0F) and funct3 != 0) or
+            (opcode == 0x73 and instr not in (0x00000073, 0x00100073) and
+             funct3 not in (1, 2, 3, 5, 6, 7))
+        )
+        if invalid:
+            halted = True
+        elif opcode == 0x33:  # OP
             if funct7 == 0x20:
                 if funct3 == 0:
                     result = (a - b) & MASK32
@@ -277,7 +293,7 @@ def demo_program():
     asm.raw(i_type(8, 0, 4, 6, 0x03))       # lbu  x6, 8(x0)
     asm.raw(u_type(0x12345000, 7, 0x37))    # lui  x7, 0x12345
     asm.raw(u_type(0x00001000, 11, 0x17))   # auipc x11, 0x1
-    asm.raw(i_type(0x801, 0, 5, 12, 0x13))  # srai x12, x0, ... (shamt 1)
+    asm.raw(i_type(0x401, 0, 5, 12, 0x13))  # srai x12, x0, 1
     asm.raw(j_type(12, 8))                  # jal  x8, func
     asm.raw(i_type(1, 0, 0, 9, 0x13))       # addi x9, x0, 1
     asm.raw(0x00000073)                     # ecall

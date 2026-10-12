@@ -72,6 +72,35 @@ fn rs1(instr: u32) -> u32 { instr[15:20] as u32 }
 fn rs2(instr: u32) -> u32 { instr[20:25] as u32 }
 fn funct7(instr: u32) -> u32 { instr[25:32] as u32 }
 
+// Validate the supported encodings before any register or memory effects.
+fn is_supported(instr: u32) -> bool {
+    let op = opcode(instr);
+    let f3 = funct3(instr);
+    let f7 = funct7(instr);
+    if op == u32:0x33 {
+        f7 == u32:0 || (f7 == u32:0x20 && (f3 == u32:0 || f3 == u32:5))
+    } else if op == u32:0x13 {
+        if f3 == u32:1 { f7 == u32:0 }
+        else if f3 == u32:5 { f7 == u32:0 || f7 == u32:0x20 }
+        else { true }
+    } else if op == u32:0x03 {
+        f3 == u32:0 || f3 == u32:1 || f3 == u32:2 || f3 == u32:4 || f3 == u32:5
+    } else if op == u32:0x23 {
+        f3 <= u32:2
+    } else if op == u32:0x63 {
+        f3 == u32:0 || f3 == u32:1 || f3 >= u32:4
+    } else if op == u32:0x67 || op == u32:0x0f {
+        // FENCE's reserved operand/mode fields are intentionally ignored.
+        f3 == u32:0
+    } else if op == u32:0x73 {
+        instr == u32:0x0000_0073 || instr == u32:0x0010_0073 ||
+        f3 == u32:1 || f3 == u32:2 || f3 == u32:3 ||
+        f3 == u32:5 || f3 == u32:6 || f3 == u32:7
+    } else {
+        op == u32:0x6f || op == u32:0x37 || op == u32:0x17
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Immediates. DSLX slices are half-open [low:high); concatenation is high:low.
 // ---------------------------------------------------------------------------
@@ -141,7 +170,7 @@ fn exec_load(regs: u32[32], pc: u32, dest: u32, addr: u32, rdata: u32,
 fn exec_store(regs: u32[32], pc: u32, addr: u32, src: u32, f3: u32) -> StepResult {
     let byte_offset: u32 = (addr & u32:3) * u32:8;
     let half_offset: u32 = (addr & u32:2) * u32:8;
-    let half_strobe: u2 = ((addr >> u32:1) & u32:1) as u2;
+    let half_strobe: u2 = (addr & u32:2) as u2;
     let (wdata, wstrb) = if f3 == u32:0 {
         (src << byte_offset, u4:1 << (addr & u32:3) as u2)
     } else if f3 == u32:1 {
@@ -197,17 +226,18 @@ fn exec_op_imm(regs: u32[32], pc: u32, instr: u32, dest: u32, a: u32,
 
 fn exec_op(regs: u32[32], pc: u32, dest: u32, a: u32, b: u32, f3: u32,
            f7: u32) -> StepResult {
+    let shamt = b[0:5];
     let value = if f7 == u32:0x20 {
         if f3 == u32:0 { a - b }
-        else if f3 == u32:5 { ((a as s32) >> (b as u32)) as u32 }
+        else if f3 == u32:5 { ((a as s32) >> shamt) as u32 }
         else { u32:0 }
     } else {
         if f3 == u32:0 { a + b }
-        else if f3 == u32:1 { a << (b as u32) }
+        else if f3 == u32:1 { a << shamt }
         else if f3 == u32:2 { if (a as s32) < (b as s32) { u32:1 } else { u32:0 } }
         else if f3 == u32:3 { if a < b { u32:1 } else { u32:0 } }
         else if f3 == u32:4 { a ^ b }
-        else if f3 == u32:5 { a >> (b as u32) }
+        else if f3 == u32:5 { a >> shamt }
         else if f3 == u32:6 { a | b }
         else { a & b }
     };
@@ -219,12 +249,13 @@ fn exec_system(regs: u32[32], pc: u32, instr: u32, f3: u32) -> StepResult {
     // instructions are treated as NOPs in this base implementation.
     let imm = instr[20:32] as u32;
     let halt = f3 == u32:0 && (imm == u32:0 || imm == u32:1);
-    commit(regs, pc + u32:4, false, u32:0, u32:0, no_req(), halt)
+    commit(regs, if halt { pc } else { pc + u32:4 },
+           false, u32:0, u32:0, no_req(), halt)
 }
 
-fn illegal() -> StepResult {
+fn illegal(state: State) -> StepResult {
     StepResult {
-        state: State { regs: zero!<u32[32]>(), pc: u32:0 },
+        state: state,
         dmem: no_req(),
         halt: true,
     }
@@ -243,7 +274,9 @@ pub fn step(state: State, imem_rdata: u32, dmem_rdata: u32) -> StepResult {
     let b = reg_read(state.regs, rs2(instr));
     let regs = state.regs;
     let pc = state.pc;
-    if op == u32:0x33 {
+    if !is_supported(instr) {
+        illegal(state)
+    } else if op == u32:0x33 {
         exec_op(regs, pc, dest, a, b, f3, funct7(instr))
     } else if op == u32:0x13 {
         exec_op_imm(regs, pc, instr, dest, a, f3)
@@ -268,6 +301,6 @@ pub fn step(state: State, imem_rdata: u32, dmem_rdata: u32) -> StepResult {
         // FENCE is a no-op for this single-cycle, in-order core.
         commit(regs, pc + u32:4, false, u32:0, u32:0, no_req(), false)
     } else {
-        illegal()
+        illegal(state)
     }
 }

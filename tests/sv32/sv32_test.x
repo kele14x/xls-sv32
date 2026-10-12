@@ -250,3 +250,106 @@ fn fence_is_a_nop() {
     assert_eq(r.state.pc, u32:0x44);
     assert_eq(r.halt, false);
 }
+
+#[test]
+fn register_shifts_use_only_five_bits() {
+    let counts = u32[6]:[0, 31, 32, 33, 0xffff_ffe1, 0xffff_ffff];
+    let left = u32[6]:[0x8000_0001, 0x8000_0000, 0x8000_0001, 2, 2, 0x8000_0000];
+    let right = u32[6]:[0x8000_0001, 1, 0x8000_0001, 0x4000_0000, 0x4000_0000, 1];
+    let signed = u32[6]:[0x8000_0001, 0xffff_ffff, 0x8000_0001,
+                         0xc000_0000, 0xc000_0000, 0xffff_ffff];
+    for (i, ()): (u32, ()) in u32:0..u32:6 {
+        let s = set_reg(set_reg(init(), u32:1, u32:0x8000_0001), u32:2, counts[i]);
+        let l = sv32::step(s, r_type(u32:0, u32:2, u32:1, u32:1, u32:3), u32:0);
+        let r = sv32::step(s, r_type(u32:0, u32:2, u32:1, u32:5, u32:3), u32:0);
+        let a = sv32::step(s, r_type(u32:0x20, u32:2, u32:1, u32:5, u32:3), u32:0);
+        assert_eq(reg(l, u32:3), left[i]);
+        assert_eq(reg(r, u32:3), right[i]);
+        assert_eq(reg(a, u32:3), signed[i]);
+        assert_eq(l.halt || r.halt || a.halt, false);
+    }(())
+}
+
+#[test]
+fn halfword_stores_select_both_aligned_lanes() {
+    let s = set_reg(set_reg(init(), u32:1, u32:0x1000), u32:2, u32:0xabcd);
+    let low = sv32::step(s, s_type(s32:0, u32:2, u32:1, u32:1), u32:0);
+    let high = sv32::step(s, s_type(s32:2, u32:2, u32:1, u32:1), u32:0);
+    assert_eq(low.dmem.addr, u32:0x1000);
+    assert_eq(high.dmem.addr, u32:0x1000);
+    assert_eq(low.dmem.wstrb, u4:0b0011);
+    assert_eq(high.dmem.wstrb, u4:0b1100);
+    assert_eq(low.dmem.wdata, u32:0xabcd);
+    assert_eq(high.dmem.wdata, u32:0xabcd_0000);
+}
+
+#[test]
+fn unsupported_encodings_halt_without_effects() {
+    let s = set_pc(set_reg(set_reg(init(), u32:1, u32:3),
+                          u32:2, u32:7), u32:0x40);
+    let instructions = u32[25]:[
+        0x0220_81b3, // MUL (M extension)
+        0x4020_91b3, // Unsupported OP funct7/funct3 combination
+        0xfe20_81b3, // Unsupported OP funct7
+        0x0200_9193, // Invalid SLLI upper immediate bits
+        0x4000_9193, // Invalid SLLI with SRAI's funct7
+        0x0200_d193, // Invalid SRLI upper immediate bits
+        0x8010_d193, // Invalid shift from the original demo
+        0x0000_3183, // Unsupported load funct3 = 3
+        0x0000_6183, // Unsupported load funct3 = 6
+        0x0000_7183, // Unsupported load funct3 = 7
+        0x0020_3023, // Unsupported store funct3 = 3
+        0x0020_4023,
+        0x0020_5023,
+        0x0020_6023,
+        0x0020_7023,
+        0x0020_a463, // Unsupported branch funct3 = 2
+        0x0020_b463, // Unsupported branch funct3 = 3
+        0x0000_91e7, // Invalid JALR funct3
+        0x3020_0073, // MRET
+        0x1050_0073, // WFI
+        0x0000_4073, // Reserved SYSTEM funct3
+        0x0000_00f3, // ECALL with nonzero rd
+        0x0000_8073, // ECALL with nonzero rs1
+        0x0000_100f, // FENCE.I (unsupported extension)
+        0xffff_ffff, // Unknown major opcode
+    ];
+    for (instr, ()): (u32, ()) in instructions {
+        let r = sv32::step(s, instr, u32:0xdead_beef);
+        assert_eq(r.halt, true);
+        assert_eq(r.state, s);
+        assert_eq(r.dmem, sv32::DMemReq { addr: u32:0, wdata: u32:0, wstrb: u4:0 });
+    }(())
+}
+
+#[test]
+fn csr_encodings_remain_nops() {
+    let s = set_pc(set_reg(init(), u32:3, u32:0xdead_beef), u32:0x40);
+    let functions = u32[6]:[1, 2, 3, 5, 6, 7];
+    for (f3, ()): (u32, ()) in functions {
+        let r = sv32::step(s, i_type(s32:0xc00, u32:1, f3, u32:3, u32:0x73), u32:0);
+        assert_eq(r.halt, false);
+        assert_eq(r.state.regs, s.regs);
+        assert_eq(r.state.pc, u32:0x44);
+        assert_eq(r.dmem.wstrb, u4:0);
+    }(())
+}
+
+#[test]
+fn fence_ignores_reserved_operand_and_mode_fields() {
+    let s = set_reg(init(), u32:3, u32:0xdead_beef);
+    let r = sv32::step(s, u32:0xfff0_818f, u32:0);
+    assert_eq(r.halt, false);
+    assert_eq(r.state.regs, s.regs);
+    assert_eq(r.state.pc, u32:4);
+}
+
+#[test]
+fn ecall_and_ebreak_preserve_state() {
+    let s = set_pc(set_reg(init(), u32:3, u32:0xdead_beef), u32:0x40);
+    let ecall = sv32::step(s, u32:0x0000_0073, u32:0);
+    let ebreak = sv32::step(s, u32:0x0010_0073, u32:0);
+    assert_eq(ecall.state, s);
+    assert_eq(ebreak.state, s);
+    assert_eq(ecall.halt && ebreak.halt, true);
+}

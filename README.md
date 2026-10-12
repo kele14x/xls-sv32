@@ -32,8 +32,12 @@ xls-sv32/
 ├── tests/
 │   ├── sv32/
 │   │   ├── sv32_test.x          # DSLX unit tests for every instruction class
-│   │   └── sv32_ref.py          # Assembler and reference interpreter
+│   │   ├── sv32_ref.py          # Assembler and reference interpreter
+│   │   ├── sv32_cases.py        # Directed RTL programs and expected results
+│   │   └── test_build_sv32.py   # Default/custom module elaboration checks
 │   └── tools/
+│       ├── test_install_xls.py  # Offline installer recovery fixtures
+│       ├── test_nangate_install.py
 │       └── test_opensta_activity.py
 ├── scripts/
 │   ├── install-xls.sh           # Download/verify the pinned XLS release
@@ -74,9 +78,10 @@ is required:
 ./scripts/install-xls.sh
 ```
 
-The script downloads the archive into `downloads/`, checks it against the
-published SHA-256 digest, extracts it under `tools/`, and points the
-`tools/xls` symlink at it.
+The script downloads into a temporary file and caches the archive only after
+its SHA-256 digest matches the manifest. It repairs corrupt cache entries and
+incomplete installations, validates a staged installation, then refreshes
+`tools/xls`. Failed downloads or extraction leave a working default link intact.
 
 `bin/xls` launches any installed XLS executable directly. Relative paths
 resolve from the project root:
@@ -92,18 +97,21 @@ resolve from the project root:
 ```bash
 python3 scripts/build-sv32.py     # DSLX -> IR -> RTL + wrapper
 python3 scripts/test-sv32.py      # DSLX tests, RTL build, and simulation
+python3 -m unittest discover -s tests/sv32 -p 'test_*.py' -v  # Wrapper builds
 ```
 
 `test-sv32.py`:
 
 1. Runs the DSLX unit tests with the interpreter and compares results with
-   the LLVM JIT (17 tests across ALU, branches, jumps, loads, and stores).
+   the LLVM JIT (23 tests across ALU, branches, jumps, memory, and decoding).
 2. Converts `step` to XLS IR, optimizes it, and emits combinational Verilog
    plus a module signature.
 3. Generates `sv32_top.sv`, which registers the architectural state and
    exposes Harvard instruction/data memory ports.
-4. Writes a demo program, simulates the RTL with Icarus Verilog, and compares
-   every register and data-memory word against `tests/sv32/sv32_ref.py`.
+4. Simulates 35 programs with Icarus Verilog and compares every register,
+   data-memory word, halt PC, and cycle count against `tests/sv32/sv32_ref.py`.
+   Directed expectations also check reset writes, halfword lanes, shift counts,
+   and unsupported encodings independently of the reference interpreter.
 
 To simulate an existing build without rerunning the DSLX checks:
 
@@ -115,6 +123,13 @@ The quicker smoke test skips simulation and only checks the XLS flow:
 
 ```bash
 ./bin/run-smoke-test.sh
+```
+
+Installer regression tests run offline in temporary projects:
+
+```bash
+python3 -m unittest discover -s tests/tools -p 'test_install_xls.py' -v
+python3 -m unittest discover -s tests/tools -p 'test_nangate_install.py' -v
 ```
 
 ## The core in one function
@@ -134,7 +149,8 @@ step(state, imem_rdata, dmem_rdata) -> (state', dmem_req, halt)
 | `out` | out | 1125 | next state, data-memory request, and halt flag |
 
 The wrapper registers `state` and freezes it when `halt` is asserted, so
-`ECALL`/`EBREAK` cleanly stop the program. The build script parses the module
+`ECALL`/`EBREAK` and unsupported encodings stop without committing effects.
+Store strobes are suppressed during reset. The build script parses the module
 signature and computes the packed-field offsets, so it adapts if the design
 changes. See [docs/sv32.md](docs/sv32.md) for the port table, ISA
 coverage, memory model, and verification details.

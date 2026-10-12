@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests" / "sv32"))
 import sv32_ref
+import sv32_cases
 
 
 def testbench(imem_words, dmem_words, max_cycles):
@@ -39,6 +40,7 @@ module tb;
 
   reg [31:0] imem [0:IMEM_WORDS-1];
   reg [31:0] dmem [0:DMEM_WORDS-1];
+  reg [31:0] reset_dmem [0:DMEM_WORDS-1];
 
   sv32_top dut (
       .clk(clk), .rst_n(rst_n),
@@ -62,8 +64,15 @@ module tb;
   initial begin
     $readmemh("imem.hex", imem);
     $readmemh("dmem.hex", dmem);
-    repeat (2) @(negedge clk);
+    for (i = 0; i < DMEM_WORDS; i = i + 1) reset_dmem[i] = dmem[i];
+    repeat (2) begin
+      @(negedge clk);
+      if (dmem_wstrb !== 4'b0) $fatal(1, "store strobes active during reset");
+      for (i = 0; i < DMEM_WORDS; i = i + 1)
+        if (dmem[i] !== reset_dmem[i]) $fatal(1, "memory changed during reset");
+    end
     rst_n = 1;
+    #1;
     cycles = 0;
     while (!halted && cycles < MAX_CYCLES) begin
       @(negedge clk);
@@ -89,7 +98,7 @@ def write_hex(path, values, count):
 def parse_simulation(log):
     registers, memory = {}, {}
     halted = False
-    cycles = None
+    pc = cycles = None
     for line in log.splitlines():
         parts = line.split()
         if len(parts) == 3 and parts[0] == "REG":
@@ -101,7 +110,64 @@ def parse_simulation(log):
             for token in parts[1:]:
                 if token.startswith("cycles="):
                     cycles = int(token.split("=")[1])
-    return registers, memory, halted, cycles
+                elif token.startswith("pc="):
+                    pc = int(token.split("=")[1], 16)
+    return registers, memory, halted, pc, cycles
+
+
+def simulate_program(output, core, program, max_cycles):
+    output.mkdir(parents=True, exist_ok=True)
+    imem = program.instructions
+    dmem_init = program.data
+    dmem_words = program.data_words
+    expected_regs, expected_pc, expected_mem, expected_cycles, expected_halt = \
+        sv32_ref.run(imem, dmem_init, dmem_words, max_cycles)
+    if not expected_halt:
+        raise SystemExit(f"{program.name}: reference did not halt within {max_cycles} cycles")
+    # Directed expectations catch shared decoder mistakes in RTL and reference.
+    for index, value in program.registers.items():
+        if expected_regs[index] != value:
+            raise SystemExit(f"{program.name}: reference x{index} differs from directed expectation")
+    for index, value in program.memory.items():
+        if expected_mem[index] != value:
+            raise SystemExit(f"{program.name}: reference dmem[{index}] differs from directed expectation")
+    if program.halt_pc is not None and expected_pc != program.halt_pc:
+        raise SystemExit(f"{program.name}: reference halt PC differs from directed expectation")
+
+    imem_words = 1
+    while imem_words < len(imem):
+        imem_words <<= 1
+    write_hex(output / "imem.hex", imem, imem_words)
+    write_hex(output / "dmem.hex", dmem_init, dmem_words)
+    (output / "tb.sv").write_text(testbench(imem_words, dmem_words, max_cycles))
+    subprocess.run(["iverilog", "-g2012", "-s", "tb", "-o", output / "sim.vvp",
+                    core / "sv32_core.v", core / "sv32_top.sv", output / "tb.sv"],
+                   cwd=ROOT, check=True, timeout=1800)
+    result = subprocess.run(["vvp", "sim.vvp"], cwd=output,
+                            text=True, capture_output=True, timeout=1800)
+    (output / "simulation.log").write_text(result.stdout + result.stderr)
+    if result.returncode:
+        raise SystemExit(f"{program.name}: simulation failed\n" + result.stdout + result.stderr)
+    registers, memory, halted, pc, cycles = parse_simulation(result.stdout)
+    if not halted:
+        raise SystemExit(f"{program.name}: simulation did not report a halt\n" + result.stdout)
+
+    errors = []
+    for index, expected in enumerate(expected_regs):
+        actual = registers.get(index)
+        if actual != expected:
+            errors.append(f"x{index}: RTL={actual!r} ref={expected:#010x}")
+    for index, expected in enumerate(expected_mem):
+        actual = memory.get(index)
+        if actual != (expected & 0xFFFFFFFF):
+            errors.append(f"dmem[{index}]: RTL={actual!r} ref={expected:#010x}")
+    if pc != expected_pc:
+        errors.append(f"halt PC: RTL={pc!r} ref={expected_pc:#010x}")
+    if cycles is None or cycles + 1 != expected_cycles:
+        errors.append(f"cycles before halt: RTL={cycles!r} ref={expected_cycles - 1}")
+    if errors:
+        raise SystemExit(f"{program.name}: RTL/reference mismatch:\n  " + "\n  ".join(errors))
+    print(f"PASS: {program.name}: RTL matched the reference for {expected_cycles} cycles")
 
 
 def main():
@@ -111,6 +177,8 @@ def main():
                         help="simulate an existing build directory")
     parser.add_argument("--max-cycles", type=int, default=2000)
     args = parser.parse_args()
+    if args.max_cycles < 1:
+        parser.error("--max-cycles must be positive")
 
     if not shutil.which("iverilog") or not shutil.which("vvp"):
         raise SystemExit("RTL tests need iverilog and vvp on PATH")
@@ -129,43 +197,13 @@ def main():
                        cwd=ROOT, check=True, timeout=1800)
         output = ROOT / "build" / "sv32"
 
-    imem, dmem_init, dmem_words = sv32_ref.demo_program()
-    imem_words = 1
-    while imem_words < len(imem):
-        imem_words <<= 1
-    write_hex(output / "imem.hex", imem, imem_words)
-    write_hex(output / "dmem.hex", dmem_init, dmem_words)
-    (output / "tb.sv").write_text(testbench(imem_words, dmem_words, args.max_cycles))
-
-    print("Compiling RTL with Icarus Verilog", flush=True)
-    subprocess.run(["iverilog", "-g2012", "-s", "tb", "-o", output / "sim.vvp",
-                    output / "sv32_core.v", output / "sv32_top.sv", output / "tb.sv"],
-                   cwd=ROOT, check=True, timeout=1800)
-    print("Simulating", flush=True)
-    result = subprocess.run(["vvp", "sim.vvp"], cwd=output, check=True,
-                            text=True, capture_output=True, timeout=1800)
-    registers, memory, halted, cycles = parse_simulation(result.stdout)
-    if not halted:
-        raise SystemExit("simulation did not report a halt\n" + result.stdout)
-
-    expected_regs, expected_pc, expected_mem, expected_cycles, expected_halt = \
-        sv32_ref.run(imem, dmem_init, dmem_words)
-    errors = []
-    for index in range(32):
-        actual = registers.get(index)
-        if actual != expected_regs[index]:
-            errors.append(f"x{index}: RTL={actual:#010x} ref={expected_regs[index]:#010x}")
-    for index in range(dmem_words):
-        actual = memory.get(index)
-        if actual != (expected_mem[index] & 0xFFFFFFFF):
-            errors.append(f"dmem[{index}]: RTL={actual:#010x} ref={expected_mem[index]:#010x}")
-    if expected_halt and cycles is not None and cycles + 1 != expected_cycles:
-        errors.append(f"cycles: RTL={cycles + 1} ref={expected_cycles}")
-    if errors:
-        raise SystemExit("RTL/reference mismatch:\n  " + "\n  ".join(errors))
-
-    print(f"PASS: RTL matched the reference model for {expected_cycles} cycles")
-    print(f"Registers checked: 32, data words checked: {dmem_words}")
+    print("Compiling and simulating RTL regression programs", flush=True)
+    count = 0
+    for program in sv32_cases.programs():
+        case_output = output if program.name == "demo" else output / "cases" / program.name
+        simulate_program(case_output, output, program, args.max_cycles)
+        count += 1
+    print(f"PASS: {count} RTL programs; all registers, data words, halt PCs, and cycles checked")
     print(f"Outputs in {output}")
 
 

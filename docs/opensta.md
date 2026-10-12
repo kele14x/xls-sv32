@@ -102,6 +102,7 @@ python3 - <<'PY'
 import hashlib
 import json
 import shutil
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -118,8 +119,13 @@ installed = Path(manifest['installed_directory'])
 installed.mkdir(parents=True, exist_ok=True)
 shutil.copy2(archive, installed / manifest['filename'])
 link = Path('tools/nangate45')
-if not link.exists() and not link.is_symlink():
-    link.symlink_to(installed.name, target_is_directory=True)
+if link.exists() and not link.is_symlink():
+    raise RuntimeError(f'Refusing to replace {link}: expected a symlink')
+with tempfile.TemporaryDirectory(prefix='.nangate45-link-', dir=link.parent) as temporary:
+    new_link = Path(temporary) / 'nangate45'
+    new_link.symlink_to(installed.name, target_is_directory=True)
+    new_link.replace(link)
+assert hashlib.sha256(Path(manifest['library_path']).read_bytes()).hexdigest() == manifest['sha256']
 PY
 ```
 
