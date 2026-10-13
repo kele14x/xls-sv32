@@ -21,8 +21,9 @@ module sv32_soc #(
   wire ram_selected = (dmem_addr >= RAM_BASE) && ((ram_addr >> 2) < DMEM_WORDS);
   wire led_selected = dmem_addr == LED_ADDR;
 
+  // Both XLS reset inputs use the same reset: state and store suppression.
   sv32_core cpu (
-      .clk(clk), .rst_n(rst_n),
+      .clk(clk), .rst_n(rst_n), .reset_n(rst_n),
       .imem_addr(imem_addr), .imem_rdata(imem_rdata),
       .dmem_addr(dmem_addr), .dmem_wdata(dmem_wdata),
       .dmem_wstrb(dmem_wstrb), .dmem_rdata(dmem_rdata),

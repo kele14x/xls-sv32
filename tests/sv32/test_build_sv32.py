@@ -35,6 +35,22 @@ class WrapperBuildTest(unittest.TestCase):
                                 "--simulate-only", str(output), "--top-module", top,
                             ], cwd=ROOT, text=True, capture_output=True, timeout=120)
                             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                            # Exercise reset without a clock, halt across several
+                            # clocks, and restart through both public interfaces.
+                            executable = output / f"{top}-reset.vvp"
+                            result = subprocess.run([
+                                "iverilog", "-g2012", "-s", "tb",
+                                "-DCORE_MODULE=" + top,
+                                *([] if top == "sv32_top" else ["-DDIRECT_CORE"]),
+                                "-o", str(executable), str(output / "sv32_core.v"),
+                                str(output / "sv32_top.sv"),
+                                str(ROOT / "tests/sv32/reset_halt_tb.sv"),
+                            ], cwd=ROOT, text=True, capture_output=True, timeout=30)
+                            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                            result = subprocess.run(["vvp", str(executable)], cwd=ROOT,
+                                                    text=True, capture_output=True, timeout=30)
+                            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                            self.assertIn("PASS: asynchronous reset", result.stdout)
 
 
 if __name__ == "__main__":

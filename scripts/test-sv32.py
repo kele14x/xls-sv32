@@ -45,6 +45,7 @@ module tb;
 
   {module} dut (
       .clk(clk), .rst_n(rst_n),
+      {"" if module == "sv32_top" else ".reset_n(rst_n),"}
       .imem_addr(imem_addr), .imem_rdata(imem_rdata),
       .dmem_addr(dmem_addr), .dmem_wdata(dmem_wdata),
       .dmem_wstrb(dmem_wstrb), .dmem_rdata(dmem_rdata),

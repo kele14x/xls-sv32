@@ -1,15 +1,10 @@
 #!/usr/bin/env python3
-"""Generate a clocked RV32I core with explicit instruction/data memory ports.
+"""Generate the entire clocked RV32I core from a stateful DSLX proc.
 
-The DSLX `step` function is purely combinational. This script:
-
-1. Converts and optimizes it to XLS IR.
-2. Emits an internal combinational datapath plus its module signature.
-3. Parses the signature to connect named PC/register state to the datapath.
-4. Writes `sv32_core.v` with clock/reset, memory, halt, and debug ports, and
-   `sv32_top.sv` as a compatibility wrapper.
-
-Run `scripts/test-sv32.py` to build and simulate in one step.
+The only IR adaptation selects single-value channels for the plain memory
+ports. XLS generates all core RTL, including architectural state and reset.
+A separate wiring-only sv32_top alias preserves the original reset interface.
+Run scripts/test-sv32.py to build and simulate in one step.
 """
 
 import argparse
@@ -59,50 +54,6 @@ def parse_signature(text):
     return parse_message()
 
 
-def type_width(node):
-    if "bit_count" in node:
-        return int(node["bit_count"][0])
-    if "array_size" in node:
-        return int(node["array_size"][0]) * type_width(node["array_element"][0])
-    if "tuple_elements" in node:
-        return sum(type_width(element) for element in node["tuple_elements"])
-    raise ValueError(f"cannot size type node: {node}")
-
-
-def tuple_fields(node):
-    """Return [(field_type, lsb)] for a tuple, field 0 at the high end.
-
-    XLS packs the first tuple element into the most significant bits, so the
-    last field starts at bit zero.
-    """
-    high = type_width(node)
-    fields = []
-    for element in node["tuple_elements"]:
-        width = type_width(element)
-        high -= width
-        fields.append((element, high))
-    return fields
-
-
-def array_element_offset(node, index):
-    return index * type_width(node["array_element"][0])
-
-
-def data_port(signature, name):
-    for port in signature["data_ports"]:
-        if port["name"][0] == name:
-            return port
-    raise KeyError(f"port {name!r} not present in module signature")
-
-
-# ---------------------------------------------------------------------------
-# Build
-# ---------------------------------------------------------------------------
-
-def build_directory(module):
-    return ROOT / "build" / "sv32"
-
-
 def run_tool(tool, arguments, destination):
     print(f"Running {tool}", flush=True)
     try:
@@ -113,131 +64,91 @@ def run_tool(tool, arguments, destination):
         raise SystemExit(f"{tool} timed out")
 
 
-def interface_ports(signature):
-    """Share the public port declarations between the core and its alias."""
-    state_type = data_port(signature, "state")["type"][0]
-    (regs_type, _), (pc_type, _) = tuple_fields(state_type)
-    out_type = data_port(signature, "out")["type"][0]
-    (_, _), (dmem_type, _), (_, _) = tuple_fields(out_type)
-    (addr_type, _), (wdata_type, _), (wstrb_type, _) = tuple_fields(dmem_type)
-    return f'''    input wire clk,
-    input wire rst_n,
-    output wire [{type_width(addr_type) - 1}:0] imem_addr,
-    input wire [{type_width(addr_type) - 1}:0] imem_rdata,
-    output wire [{type_width(addr_type) - 1}:0] dmem_addr,
-    output wire [{type_width(wdata_type) - 1}:0] dmem_wdata,
-    output wire [{type_width(wstrb_type) - 1}:0] dmem_wstrb,
-    input wire [{type_width(wdata_type) - 1}:0] dmem_rdata,
-    output wire halted,
-    output wire [{type_width(pc_type) - 1}:0] debug_pc,
-    output wire [{type_width(regs_type) - 1}:0] debug_regs'''
+# Public data ports emitted directly by XLS. Clock/reset are codegen ports.
+PORTS = {
+    "imem_rdata": ("input", 32),
+    "dmem_rdata": ("input", 32),
+    "reset_n": ("input", 1),
+    "imem_addr": ("output", 32),
+    "dmem_addr": ("output", 32),
+    "dmem_wdata": ("output", 32),
+    "dmem_wstrb": ("output", 4),
+    "halted": ("output", 1),
+    "debug_pc": ("output", 32),
+    "debug_regs": ("output", 1024),
+}
 
 
-def core(signature, module):
-    state_port = data_port(signature, "state")
-    out_port = data_port(signature, "out")
-    state_width = int(state_port["width"][0])
-    out_width = int(out_port["width"][0])
-    state_type = state_port["type"][0]
-    out_type = out_port["type"][0]
+def single_value_ports(ir):
+    """Lower the pinned DSLX frontend's streaming ports to plain XLS wires.
 
-    (regs_type, regs_offset), (pc_type, pc_offset) = tuple_fields(state_type)
-    regs_width = type_width(regs_type)
-    reg_width = type_width(regs_type["array_element"][0])
-    reg_count = int(regs_type["array_size"][0])
-    pc_width = type_width(pc_type)
+    This is interface metadata only: state, init, next_value, and all logic
+    remain the DSLX compiler's IR. Do this before optimization/scheduling.
+    Fail closed if the frontend changes its channel representation.
+    """
+    pattern = re.compile(r"^(  chan_interface )(\w+)\(([^\n]+)\)$", re.MULTILINE)
+    names = {}
 
-    (next_state_type, next_state_offset), (dmem_type, dmem_offset), (halt_type, halt_offset) = \
-        tuple_fields(out_type)
-    (addr_type, addr_base), (wdata_type, wdata_base), (wstrb_type, wstrb_base) = \
-        tuple_fields(dmem_type)
-    addr_offset = dmem_offset + addr_base
-    wdata_offset = dmem_offset + wdata_base
-    wstrb_offset = dmem_offset + wstrb_base
+    def lower(match):
+        old_name = match[2]
+        name = old_name.removeprefix("_")
+        if name not in PORTS or name in names.values():
+            raise ValueError(f"unexpected or duplicate core channel: {old_name}")
+        attributes = dict(item.split("=", 1) for item in match[3].split(", "))
+        direction = "receive" if PORTS[name][0] == "input" else "send"
+        expected = {
+            "direction": direction, "kind": "streaming",
+            "strictness": "proven_mutually_exclusive",
+            "flow_control": "ready_valid", "flop_kind": "none",
+        }
+        if attributes != expected:
+            raise ValueError(f"unexpected channel attributes: {match[0]}")
+        names[old_name] = name
+        return f"{match[1]}{old_name}(direction={direction}, kind=single_value)"
 
-    next_state_width = type_width(next_state_type)
-    (next_regs_type, next_regs_base), (next_pc_type, next_pc_base) = tuple_fields(next_state_type)
-    next_regs_offset = next_state_offset + next_regs_base
-    next_pc_offset = next_state_offset + next_pc_base
-    addr_width = type_width(addr_type)
-    wdata_width = type_width(wdata_type)
-    wstrb_width = type_width(wstrb_type)
-    assert state_width == next_state_width
-    assert regs_width == type_width(next_regs_type)
-    assert pc_width == type_width(next_pc_type)
-
-    return f'''// Generated by scripts/build-sv32.py. Do not edit.
-// Clocked RV32I core. Packed XLS ports are internal to the datapath.
-`default_nettype none
-module {module} (
-{interface_ports(signature)}
-);
-  reg [{pc_width - 1}:0] pc;
-  reg [{reg_width - 1}:0] regs [0:{reg_count - 1}];
-  wire [{pc_width - 1}:0] next_pc;
-  wire [{reg_width - 1}:0] next_regs [0:{reg_count - 1}];
-  wire [{state_width - 1}:0] packed_state;
-  wire [{out_width - 1}:0] packed_result;
-
-  {signature["module_name"][0]} datapath (
-      .state(packed_state),
-      .imem_rdata(imem_rdata),
-      .dmem_rdata(dmem_rdata),
-      .out(packed_result)
-  );
-
-  // Only this connection layer depends on the XLS tuple/array packing.
-  assign packed_state[{pc_offset} +: {pc_width}] = pc;
-  assign next_pc = packed_result[{next_pc_offset} +: {pc_width}];
-  genvar i;
-  generate
-    for (i = 0; i < {reg_count}; i = i + 1) begin : register_connections
-      assign packed_state[{regs_offset} + i*{reg_width} +: {reg_width}] = regs[i];
-      assign next_regs[i] = packed_result[{next_regs_offset} + i*{reg_width} +: {reg_width}];
-      assign debug_regs[i*{reg_width} +: {reg_width}] = regs[i];
-    end
-  endgenerate
-
-  assign imem_addr = pc;
-  assign dmem_addr = packed_result[{addr_offset} +: {addr_width}];
-  assign dmem_wdata = packed_result[{wdata_offset} +: {wdata_width}];
-  assign dmem_wstrb = rst_n ? packed_result[{wstrb_offset} +: {wstrb_width}] : {wstrb_width}'b0;
-  assign halted = packed_result[{halt_offset}];
-  assign debug_pc = pc;
-
-  integer r;
-  always @(posedge clk or negedge rst_n) begin
-    if (!rst_n) begin
-      pc <= {pc_width}'b0;
-      for (r = 0; r < {reg_count}; r = r + 1) regs[r] <= {reg_width}'b0;
-    end else if (!halted) begin
-      pc <= next_pc;
-      for (r = 0; r < {reg_count}; r = r + 1) regs[r] <= next_regs[r];
-    end
-  end
-endmodule
-`default_nettype wire
-'''
+    ir = pattern.sub(lower, ir)
+    if set(names.values()) != set(PORTS):
+        raise ValueError("core channels do not match the expected Harvard interface")
+    # Rename identifier tokens, not substrings (or source filenames).
+    identifiers = re.compile(r'"[^"\n]*"|\b[A-Za-z_][A-Za-z_0-9]*\b')
+    return identifiers.sub(lambda match: names.get(match[0], match[0]), ir)
 
 
-def wrapper(signature, module):
-    """Keep the existing sv32_top port names as a thin alias for the core."""
-    return f'''// Generated by scripts/build-sv32.py. Do not edit.
-// Compatibility wrapper; new integrations can instantiate {module} directly.
-`default_nettype none
-module sv32_top (
-{interface_ports(signature)}
-);
-  {module} core (
-      .clk(clk), .rst_n(rst_n),
-      .imem_addr(imem_addr), .imem_rdata(imem_rdata),
-      .dmem_addr(dmem_addr), .dmem_wdata(dmem_wdata),
-      .dmem_wstrb(dmem_wstrb), .dmem_rdata(dmem_rdata),
-      .halted(halted), .debug_pc(debug_pc), .debug_regs(debug_regs)
-  );
-endmodule
-`default_nettype wire
-'''
+def validate_signature(signature, module):
+    actual = {
+        port["name"][0]: (port["direction"][0], int(port["width"][0]))
+        for port in signature["data_ports"]
+    }
+    expected = {name: ("PORT_DIRECTION_" + direction.upper(), width)
+                for name, (direction, width) in PORTS.items()}
+    if actual != expected or signature["module_name"] != [module]:
+        raise ValueError("XLS generated an unexpected core interface")
+    if signature.get("clock_name") != ["clk"]:
+        raise ValueError("XLS core is missing its clock")
+    pipeline = signature.get("pipeline", [{}])[0]
+    if (pipeline.get("latency") != ["0"]
+            or pipeline.get("initiation_interval") != ["1"]):
+        raise ValueError("XLS core must execute every cycle without registered I/O")
+    reset = signature["reset"][0]
+    if (reset["name"] != ["rst_n"] or reset["asynchronous"] != ["true"]
+            or reset["active_low"] != ["true"]):
+        raise ValueError("XLS core reset must remain asynchronous and active-low")
+
+
+def wrapper(module):
+    """A wiring-only alias preserving the original single-reset interface."""
+    ports = ["    input wire clk", "    input wire rst_n"]
+    connections = [".clk(clk)", ".rst_n(rst_n)", ".reset_n(rst_n)"]
+    for name, (direction, width) in PORTS.items():
+        if name == "reset_n":
+            continue
+        size = f" [{width - 1}:0]" if width > 1 else ""
+        ports.append(f"    {direction} wire{size} {name}")
+        connections.append(f".{name}({name})")
+    return ("// Generated compatibility wiring; all core logic is XLS-generated.\n"
+            "`default_nettype none\nmodule sv32_top (\n" + ",\n".join(ports) +
+            f"\n);\n  {module} core (\n      " + ",\n      ".join(connections) +
+            "\n  );\nendmodule\n`default_nettype wire\n")
 
 
 def main():
@@ -249,40 +160,42 @@ def main():
     if args.module_name == "sv32_top":
         parser.error("--module-name cannot be sv32_top (reserved for the compatibility wrapper)")
 
-    output = (args.output_dir or build_directory(args.module_name)).resolve()
+    output = (args.output_dir or ROOT / "build/sv32").resolve()
     output.mkdir(parents=True, exist_ok=True)
-
+    dslx_ir = output / "sv32.dslx.ir"
+    ir = output / "sv32.ir"
     run_tool("ir_converter_main",
-             ["--dslx_path=" + str(ROOT / "src" / "sv32"),
-              "--top=step", ROOT / "src" / "sv32" / "sv32.x"],
-             output / "sv32.ir")
-    run_tool("opt_main", [output / "sv32.ir"], output / "sv32.opt.ir")
+             ["--dslx_path=" + str(ROOT / "src/sv32"),
+              "--lower_to_proc_scoped_channels=true", "--top=sv32_core",
+              ROOT / "src/sv32/sv32_core.x"], dslx_ir)
+    ir.write_text(single_value_ports(dslx_ir.read_text()))
+    run_tool("opt_main", [ir], output / "sv32.opt.ir")
     signature_path = output / "sv32_core.sig.textproto"
     core_path = output / "sv32_core.v"
-    datapath_module = args.module_name + "_datapath"
+    # One proc activation per clock, combinational memory ports. XLS generates
+    # all state registers from the proc; never prepend or patch core RTL.
     run_tool("codegen_main",
-             ["--generator=combinational", f"--module_name={datapath_module}",
+             ["--generator=pipeline", "--pipeline_stages=1", "--delay_model=unit",
+              "--flop_inputs=false", "--flop_outputs=false",
+              "--flop_single_value_channels=false",
+              "--reset=rst_n", "--reset_active_low=true", "--reset_asynchronous=true",
+              "--reset_data_path=true", f"--module_name={args.module_name}",
               "--use_system_verilog=false",
-              f"--output_signature_path={signature_path}", output / "sv32.opt.ir"],
-             core_path)
-
-    signature = parse_signature(signature_path.read_text())
-    datapath = core_path.read_text()
-    core_path.write_text(core(signature, args.module_name) +
-                         "\n// Internal combinational XLS implementation of step.\n"
-                         "// Bundled with the public core for standalone compilation.\n"
-                         "/* verilator lint_off DECLFILENAME */\n" + datapath +
-                         "\n/* verilator lint_on DECLFILENAME */\n")
-    (output / "sv32_top.sv").write_text(wrapper(signature, args.module_name))
+              f"--output_signature_path={signature_path}",
+              f"--output_schedule_path={output / 'sv32.schedule.textproto'}",
+              output / "sv32.opt.ir"], core_path)
+    validate_signature(parse_signature(signature_path.read_text()), args.module_name)
+    (output / "sv32_top.sv").write_text(wrapper(args.module_name))
     (output / "config.json").write_text(json.dumps({
         "module": args.module_name,
         "isa": "RV32I",
-        "generator": "combinational",
+        "generator": "pipeline",
+        "pipeline_stages": 1,
         "interface": "clocked_harvard",
         "core_module": args.module_name,
-        "datapath_module": datapath_module,
-        "state_width": int(data_port(signature, "state")["width"][0]),
-        "output_width": int(data_port(signature, "out")["width"][0]),
+        "dslx_top": "sv32_core",
+        "channel_kind": "single_value",
+        "reset_data_port": "reset_n",
     }, indent=2) + "\n")
     print(f"Generated {core_path} and {output / 'sv32_top.sv'}")
 

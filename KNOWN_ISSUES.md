@@ -25,7 +25,7 @@ toolchain installation.
 
 ## 1. [P1] Halfword stores corrupt memory at byte offset 2
 
-**Location:** [src/sv32/sv32.x](src/sv32/sv32.x), lines 144–148,
+**Location:** [src/sv32/sv32_execute.x](src/sv32/sv32_execute.x), lines 144–148,
 `exec_store`.
 
 For an address with byte offset 2, `half_strobe` is 1. Shifting the halfword
@@ -48,7 +48,7 @@ of neighboring bytes and a subsequent load.
 
 ## 2. [P1] Register shifts use the full register as the shift count
 
-**Location:** [src/sv32/sv32.x](src/sv32/sv32.x), lines 202, 206, and 210,
+**Location:** [src/sv32/sv32_execute.x](src/sv32/sv32_execute.x), lines 202, 206, and 210,
 `exec_op`.
 
 `SLL`, `SRL`, and `SRA` shift by all 32 bits of `rs2`. RV32I requires the
@@ -90,7 +90,7 @@ and verifies that memory remains unchanged.
 
 ## 4. [P2] Unsupported encodings bypass the illegal-instruction halt policy
 
-**Location:** [src/sv32/sv32.x](src/sv32/sv32.x), lines 198–214,
+**Location:** [src/sv32/sv32_execute.x](src/sv32/sv32_execute.x), lines 198–214,
 `exec_op`, and lines 145–150, `exec_store`. Similar missing legality checks
 exist for immediate shifts, loads, branches, and `JALR`.
 
