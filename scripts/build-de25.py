@@ -42,18 +42,25 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=ROOT / "build/de25_nano")
     parser.add_argument("--compile", action="store_true", help="also run the full Quartus flow")
+    parser.add_argument("--firmware", choices=("python", "c"), default="python")
+    parser.add_argument("--toolchain-prefix", default=build_soc.build_firmware.DEFAULT_PREFIX)
+    parser.add_argument("--seed", type=int, default=1, help="Quartus fitter placement seed")
     args = parser.parse_args()
+    if args.seed < 1:
+        parser.error("--seed must be positive")
     quartus = shutil.which("quartus_sh")
     if not quartus:
         parser.error("Quartus Prime Pro must be on PATH to generate the board clock/reset IP")
     qsys_bin = Path(quartus).resolve().parents[2] / "qsys/bin"
-    output = build_soc.build(args.output_dir)
+    output = build_soc.build(args.output_dir, firmware=args.firmware,
+                             toolchain_prefix=args.toolchain_prefix)
     board = ROOT / "boards/de25_nano"
     sources = [output / "sv32_core.v", *build_soc.SOC_SOURCES, board / "sv32_de25_nano.v"]
     qsf = [f"source {json.dumps(str(board / 'pins.qsf'))}",
            'set_global_assignment -name TOP_LEVEL_ENTITY sv32_de25_nano',
            'set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files',
            'set_global_assignment -name NUM_PARALLEL_PROCESSORS 8',
+           f'set_global_assignment -name SEED {args.seed}',
            f"set_global_assignment -name SDC_FILE {json.dumps(str(board / 'timing.sdc'))}",
            "set_parameter -name IMEM_INIT_FILE " + json.dumps(json.dumps(str(output / "blinky.hex")))]
     qsf.extend("set_global_assignment -name VERILOG_FILE " + json.dumps(str(path))

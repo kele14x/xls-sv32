@@ -20,16 +20,20 @@ core with a declared ISA and execution environment.
 - [x] Synthesizable 1 KiB instruction ROM, 1 KiB data RAM, LED MMIO, and a
   13-instruction blinky program.
 - [x] DE25-NANO pins, vendor PLL/reset-release IP, and a 100 MHz CPU clock.
-- [x] DSLX, directed core RTL, memory/MMIO, board-wrapper simulation, and
-  synthesized-netlist blinky checks.
+- [x] DSLX, directed core RTL, memory/MMIO, and board-wrapper simulation.
+- [x] Bare-metal C blinky using `/opt/riscv` GCC, RV32I/ILP32, reset startup,
+  BSS clearing, a RAM stack, and ELF-to-ROM conversion (2026-10-14).
+  C simulation covers warm reset, stack use, and blink cadence.
+  `build/de25_nano_c/` contains the seed-2 Quartus image: +0.001 ns setup
+  and +0.061 ns hold at 100 MHz; setup margin is very small.
 - [x] Quartus synthesis, fitting, timing, and assembly for the XLS proc core:
-  setup slack +0.353 ns and hold slack +0.102 ns at 100 MHz (2026-10-13).
-  See `docs/soc.md` for validation and the separate `build/de25_nano_xls/` build.
+  setup slack +0.353 ns and hold slack +0.102 ns at 100 MHz (2026-10-14).
+  See `docs/soc.md` for validation and the current `build/de25_nano/` build.
 - [ ] Physical board programming and observation.
 
 Build commands, address maps, test coverage, and timing details are in
-[docs/soc.md](docs/soc.md). The eight earlier fixed findings are preserved in
-[KNOWN_ISSUES.md](KNOWN_ISSUES.md); the gaps below are additional work.
+[docs/soc.md](docs/soc.md). The seven retained earlier fixed findings are
+preserved in [KNOWN_ISSUES.md](KNOWN_ISSUES.md); the gaps below are additional work.
 
 ## Findings in the current implementation
 
@@ -42,7 +46,7 @@ Build commands, address maps, test coverage, and timing details are in
 | Memory implementation | [IMEM](src/sv32_soc/sv32_imem.v) and [DMEM](src/sv32_soc/sv32_dmem.v) use asynchronous reads. | Synchronous block RAM and a controller that waits for responses as memory sizes grow. |
 | Address faults | [sv32_soc](src/sv32_soc/sv32_soc.v) returns zero for unmapped data reads and ignores writes; invalid fetches return zero and halt as illegal instructions. | Define region permissions and return instruction/load/store access faults where appropriate. |
 | Interrupts and peripherals | The SoC has an LED register, with no interrupt inputs, timer, or UART. | Machine interrupt handling, timer/compare registers, and useful firmware I/O. |
-| Firmware | [blinky.py](programs/blinky.py) emits instruction words directly. | A reproducible compiler, linker, startup, and ELF-to-memory flow. |
+| Firmware | Python-generated blinky and compiled [blinky.c](programs/blinky.c) with reset startup and ELF-to-ROM conversion. | Initialized data/constants in the Harvard memory map, traps, timer-driven firmware, and UART. |
 | Verification | Directed tests and a local Python model cover the current halt policy. | Architectural tests, retirement-level reference comparisons, and trap/interrupt/stall coverage. |
 
 Example alignment failure to address: `LW` at `0x1001` currently reads the
@@ -54,7 +58,7 @@ not raise that exception.
 
 ## 0. Test the current blinky on DE25-NANO
 
-- [ ] Program `build/de25_nano_xls/output_files/sv32_de25_nano.sof` through
+- [ ] Program `build/de25_nano/output_files/sv32_de25_nano.sof` through
   Quartus Programmer and the onboard USB-Blaster III, following
   [the board flow](docs/soc.md#de25-nano-at-100-mhz).
 - [ ] Confirm LED 0 alternates approximately 0.5 seconds on / 0.5 seconds off
@@ -127,6 +131,10 @@ Acceptance: a timer handler drives the LED while foreground code continues
 running, with correct state preservation across repeated interrupts.
 
 ## 4. Compiled C firmware and useful I/O
+
+The initial RV32I/ILP32 C blinky, stack/BSS startup, and ELF-to-ROM flow are
+implemented and tested in simulation. The remaining work below expands that
+baseline to initialized data, traps, timer interrupts, and useful I/O.
 
 - [ ] Pin a RISC-V GCC or LLVM toolchain and use matching ISA/ABI flags
   (initially `rv32i_zicsr` and `ilp32`).

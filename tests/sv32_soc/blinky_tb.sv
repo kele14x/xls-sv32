@@ -8,11 +8,7 @@ module tb;
   reg rst_n = 0;
   wire led, halted;
   wire [31:0] debug_pc;
-`ifdef GATE_SIM
-  sv32_soc dut (
-`else
   sv32_soc #(.IMEM_INIT_FILE(IMEM_INIT_FILE)) dut (
-`endif
       .clk(clk), .rst_n(rst_n), .led(led), .halted(halted), .debug_pc(debug_pc)
   );
   integer epoch, cycles, toggles;

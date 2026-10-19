@@ -37,10 +37,9 @@ RAM contents are preserved during reset, and reset suppresses RAM writes.
 RAM has no power-up initialization unless `DMEM_INIT_FILE` is supplied; the
 blinky firmware explicitly initializes its counter before reading it.
 
-The single-cycle core requires asynchronous reads. On the DE25-NANO these
-memories synthesize into ROM logic and RAM registers/multiplexers rather than
-synchronous block RAM. This matches the supported
-[Yosys asynchronous-memory patterns](https://yosyshq.readthedocs.io/projects/yosys/en/latest/using_yosys/synthesis/memory.html).
+The single-cycle core requires asynchronous reads. On the DE25-NANO,
+Quartus implements these memories as ROM logic and RAM registers/multiplexers
+rather than synchronous block RAM.
 
 ## Blinky firmware
 
@@ -65,10 +64,84 @@ Outputs are in `build/sv32_soc/`: `sv32_core.v`, `blinky.hex`, the readable
 compile the generated core plus the three files under `src/sv32_soc/`.
 For a custom build directory, pass its ROM path as `IMEM_INIT_FILE`.
 
-## Simulation and synthesis checks
+## Compiled C ROM firmware
+
+`programs/blinky.c` builds with the bare-metal RISC-V GCC toolchain installed
+under `/opt/riscv/bin`. Use `riscv32-unknown-elf-gcc` from `PATH`; the build
+explicitly selects `rv32i` and `ilp32`, with no compressed, multiply/divide,
+floating-point, or atomic instructions. It links without libc or an OS.
+
+`programs/crt0.S` starts at address zero, sets a 16-byte-aligned stack at
+`0x1400`, clears `.bss`, and calls `main`. If `main` returns, `EBREAK` halts
+the core. `programs/sv32.ld` places instructions in the 1 KiB ROM and BSS
+in RAM at `0x1000`; it reserves the upper 256 RAM bytes for the stack.
+Small-data addressing and linker relaxation are disabled, so startup does
+not need a global pointer.
+
+Build firmware alone, or integrate it with the SoC and Quartus board project:
 
 ```bash
-python3 scripts/test-soc.py --synthesize
+python3 scripts/build-firmware.py
+python3 scripts/build-soc.py --firmware c --output-dir build/sv32_soc_c
+python3 scripts/test-soc.py --firmware c --output-dir build/sv32_soc_c_test
+python3 scripts/build-de25.py --firmware c --seed 2 --output-dir build/de25_nano_c --compile
+```
+
+The standalone output directory is `build/firmware/blinky/`; integrated builds
+put the same files in their selected output directory. Outputs include
+`blinky.elf`, `blinky.bin`, `blinky.hex`, `blinky.lst`, `blinky.map`,
+`blinky.size`, and `firmware-config.json` with compiler/flags and memory symbols.
+The `.hex` contains 256 little-endian instruction words for `$readmemh`.
+The default C program toggles the LED approximately every 0.5 seconds at
+100 MHz; compiler-generated call/loop overhead is included in that interval.
+
+The C simulation uses a short delay and starts RAM with nonzero data. It
+checks BSS initialization, counter increments, aligned stack use, regular
+LED transitions, and restart after warm reset. It also checks the board's
+reset and LED polarity. To exercise a larger delay constant:
+
+```bash
+python3 scripts/test-soc.py --firmware c --delay-iterations 2048 \
+  --output-dir build/sv32_soc_c_carry_test
+```
+
+The current Harvard instruction ROM is not readable through data loads.
+The linker rejects initialized `.data` and `.rodata` (including string
+constants and lookup tables) until a RAM initialization or shared-memory
+scheme is added. It also rejects ROM overflow and BSS/stack overlap. The
+current startup supports zero-initialized globals and stack-based C code.
+
+This is firmware embedded in the FPGA ROM. A bootloader that receives and
+launches another program needs a transport such as UART or flash and
+writable instruction storage; these are future SoC additions.
+
+Changing the firmware also changes the combinational ROM logic synthesized
+by Quartus. The CPU RTL is identical between the Python and C builds, but
+the complete netlist and placement/routing differ. The load critical path
+passes through instruction ROM, address/register logic, asynchronous data
+RAM, and load formatting before register writeback, all in one clock cycle.
+Every firmware image therefore needs a fresh FPGA timing check.
+`build-de25.py --seed N` selects a fitter placement seed (default 1).
+
+The 2026-10-14 Quartus Prime Pro 26.1.1 builds report these 100 MHz results:
+
+| Firmware | Fitter seed | Setup slack | Hold slack |
+| --- | --- | --- | --- |
+| Python blinky | 1 | +0.353 ns | +0.102 ns |
+| C blinky | 1 | -0.078 ns | +0.061 ns |
+| C blinky | 2 | +0.001 ns | +0.061 ns |
+| C blinky | 3 | -0.005 ns | +0.061 ns |
+
+The seed-2 programming image and passing timing report are under
+`build/de25_nano_c/`. Setup margin is only 0.001 ns; the device timing models
+are preliminary and physical board testing remains pending. The seed-3
+experiment under `build/de25_nano_c_seed3/` does not meet the timing target.
+For the passing C image, the design uses 6,674 ALMs and 14,417 registers.
+
+## Simulation checks
+
+```bash
+python3 scripts/test-soc.py
 ```
 
 This uses a shortened delay of eight iterations while keeping the same
@@ -83,11 +156,9 @@ instructions as the hardware program. It checks:
 - The DE25-NANO wrapper's synchronized reset and active-low LED wiring,
   using a behavioral clocking model; the real clock/reset IP is checked by
   Quartus.
-- Yosys synthesis and `check -assert`, followed by the same blinky test on
-  the synthesized gate netlist.
 
 Logs and waveforms are under `build/sv32_soc_test/`. Open
-`rtl/blinky.vcd` or `gate/blinky.vcd` in a waveform viewer. To exercise the
+`rtl/blinky.vcd` in a waveform viewer. To exercise the
 constant-loading sequence across a signed-immediate boundary:
 
 ```bash
@@ -114,7 +185,8 @@ synchronized with two flip-flops. The board wrapper handles LED polarity.
 The hard processor system and external SDRAM/LPDDR4 are not used.
 
 With Quartus Prime Pro and Agilex 5 device support on `PATH`, generate the
-project and vendor clock/reset IP:
+project and vendor clock/reset IP. The fitter also requires an Agilex 5
+license; allow access to the licensing service when using online licensing.
 
 ```bash
 python3 scripts/build-de25.py
@@ -136,6 +208,24 @@ through Quartus Programmer using the onboard USB-Blaster III. LED 0 blinks
 once per second; pressing KEY0 restarts the program.
 
 The scripts generate files and build the image; they do not program the board.
+
+## Current Quartus build (2026-10-14)
+
+Quartus Prime Pro 26.1.1 completed synthesis, fitting, timing analysis, and
+assembly for the XLS proc core and `A5EB013BB23BE4SR1` in `build/de25_nano/`.
+The 100 MHz CPU clock meets timing with **+0.353 ns setup** and
+**+0.102 ns hold** slack. Recovery, removal, and pulse-width checks also pass;
+the results are saved in `build/de25_nano/timing-verification.json`.
+The design uses 7,259 ALMs and 8,753 dedicated registers.
+
+The current programming image is
+`build/de25_nano/output_files/sv32_de25_nano.sof` (1,012,470 bytes).
+Compilation completed with zero errors and four warnings about preliminary
+device timing models and default I/O electrical settings. The signoff report
+contains no high- or medium-severity violations.
+
+Memory, MMIO, RTL blinky, board-wrapper simulations, and all 10 XLS installer
+tests pass. Physical board programming and observation remain pending.
 
 ## Verified build before the XLS proc migration
 
@@ -163,8 +253,7 @@ asynchronous reset without a clock edge, reset-time store suppression, dependent
 instructions on consecutive cycles, state preservation on halt, and restart.
 
 The unchanged Verilog memories, MMIO, and board behavior pass their simulations.
-Yosys synthesis and structural checks pass, as does gate-netlist blinky with exact
-LED toggle timing and reset/restart.
+RTL blinky passes with exact LED toggle timing and reset/restart.
 
 A separate Quartus build of the proc core is under `build/de25_nano_xls/`:
 

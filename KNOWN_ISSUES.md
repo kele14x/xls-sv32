@@ -1,7 +1,7 @@
 # Known issues
 
-All eight findings below were fixed on 2026-10-12. The reproductions and line
-numbers record the pre-fix code reviewed on 2026-10-10.
+All seven retained findings below were fixed on 2026-10-12. The reproductions
+and line numbers record the pre-fix code reviewed on 2026-10-10.
 
 | Issue | Resolution | Regression coverage |
 | --- | --- | --- |
@@ -12,11 +12,10 @@ numbers record the pre-fix code reviewed on 2026-10-10.
 | 5. Custom module names | Instantiate the requested module in the wrapper | Default and custom builds elaborate with Icarus |
 | 6. Incomplete installations | Stage and validate executables/stdlib before publishing | Offline fixtures repair incomplete directories and preserve defaults on failure |
 | 7. Interrupted downloads | Verify temporary downloads; replace invalid cache entries | Offline interruption, checksum, corruption, and retry fixtures |
-| 8. Nangate45 links | Atomically refresh the symlink and verify the active library | Exact documentation recipe tested with fresh, stale, and dangling links |
 
-Validation: 23 DSLX/JIT and IR-interpreter tests, 35 RTL programs, default
-and custom wrapper builds, and 14 tooling tests all pass. The tooling tests
-include the existing OpenSTA activity checks. Test commands are listed in
+Validation at the time of the fixes included 23 DSLX/JIT and IR-interpreter
+tests, 35 RTL programs, default and custom wrapper builds, and XLS installer
+fixtures. Current test commands are listed in
 [README.md](README.md).
 
 P1 issues affect valid RV32I instructions. P2 issues affect reset behavior,
@@ -208,39 +207,8 @@ Deleting the partial archive permits a successful retry.
 rename it into the cache only after verification. Detect invalid existing cache
 entries and redownload them rather than permanently blocking retries.
 
-### 8. [P2] Nangate45 installation leaves an existing default link unchanged
+### Tooling regression coverage
 
-**Location:** [docs/opensta.md](docs/opensta.md), lines 120–122, the library
-installation recipe.
-
-The recipe verifies the downloaded library and copies it into the versioned
-directory, but creates `tools/nangate45` only if no file or symlink exists
-there. If the default link points at an older library, it remains unchanged.
-A dangling symlink is also left unrepaired. Tests and future timing/power
-flows read through this default link, so the active library can differ from
-the verified installation and manifest.
-
-**Reproduction:** Run the exact documentation snippet in an isolated fixture
-with `tools/nangate45` pointing at an older library and the manifest describing
-a new versioned directory. The snippet succeeds and writes the verified new
-library, but reading the manifest's `library_path` still returns the old
-library. No upstream download or workspace tool modification is needed for
-this reproduction.
-
-**Suggested fix:** Refresh the default symlink to the verified versioned
-directory and verify the checksum through `library_path` after the switch.
-Handle an existing regular file or directory explicitly instead of silently
-leaving it active.
-
-### Tooling validation
-
-- XLS, OpenSTA, and Yosys version commands succeed in the current workspace.
-- All three cached source/release archive checksums match their manifests.
-- Installed OpenSTA, Yosys, ABC, and Nangate45 checksums match their manifests.
-- XLS, OpenSTA, Yosys, and ABC have no unresolved shared libraries.
-- Both OpenSTA activity tests pass, including all four gated-clock cases.
-- The three installation findings were reproduced in temporary fixtures;
-  the workspace's installed tools and symlinks were left intact.
-
-The current installations are healthy. These findings concern recovery from
-interrupted setup and refreshing the default verification-library link.
+The XLS installation findings are covered by offline fixtures in
+`tests/tools/test_install_xls.py`, including incomplete installations,
+interrupted downloads, invalid checksums, and default-link recovery.

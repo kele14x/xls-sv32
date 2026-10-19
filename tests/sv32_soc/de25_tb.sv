@@ -22,7 +22,9 @@ endmodule
 module tb;
   parameter IMEM_INIT_FILE = "blinky.hex";
   parameter integer DELAY_ITERATIONS = 8;
+  parameter integer C_FIRMWARE = 0;
   localparam integer INTERVAL = 2 * DELAY_ITERATIONS + 8;
+  localparam integer MAX_CYCLES = C_FIRMWARE ? 200 + 12 * DELAY_ITERATIONS : 8 + 4 * INTERVAL;
   reg clk50 = 0;
   always #10 clk50 = ~clk50;
   reg key_n = 0;
@@ -45,11 +47,14 @@ module tb;
       previous_led = 1;
       cycles = 0;
       toggles = 0;
-      while (toggles < 4 && cycles < 8 + 4 * INTERVAL) begin
+      while (toggles < 4 && cycles < MAX_CYCLES) begin
         @(negedge dut.clk_100);
         cycles = cycles + 1;
+        if (dut.soc.halted !== 0) $fatal(1, "board firmware halted");
+        if (led_n !== 0 && led_n !== 1) $fatal(1, "board LED unknown");
         if (led_n != previous_led) begin
-          if (cycles != 8 + toggles * INTERVAL) $fatal(1, "board LED timing/polarity mismatch");
+          if (!C_FIRMWARE && cycles != 8 + toggles * INTERVAL)
+            $fatal(1, "board LED timing/polarity mismatch");
           previous_led = led_n;
           toggles = toggles + 1;
         end
@@ -60,7 +65,7 @@ module tb;
     $finish;
   end
   initial begin
-    #(2000 + 100 * INTERVAL);
+    #(2000 + 20 * MAX_CYCLES);
     $fatal(1, "board reset/PLL-lock timeout");
   end
 endmodule

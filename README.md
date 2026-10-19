@@ -6,6 +6,8 @@ repository is a testbed for using XLS on real RTL: DSLX is type-checked and
 simulated with the XLS interpreter and LLVM JIT, lowered to optimized IR,
 emitted entirely by XLS as a clocked Verilog core with explicit memory ports,
 and simulated with Icarus Verilog against an independent Python reference model.
+Altera Quartus Prime Pro synthesizes, fits, checks timing, and assembles the
+DE25-NANO FPGA programming image.
 
 The design is documented in [docs/sv32.md](docs/sv32.md).
 The complete blinky SoC and DE25-NANO board flow are documented in
@@ -22,22 +24,20 @@ xls-sv32/
 ├── .gitignore                   # Local tools, builds, and caches
 ├── bin/                         # Executable launchers (tracked)
 │   ├── xls                      # Linux XLS tool launcher
-│   ├── sta                      # Linux OpenSTA launcher
-│   ├── yosys                    # Linux Slang-enabled Yosys launcher
 │   └── run-smoke-test.sh        # Smoke-test launcher
 ├── config/
 │   └── tools/                   # Pinned installation manifests (tracked)
-│       ├── xls-install.json
-│       ├── opensta-install.json
-│       ├── yosys-install.json
-│       └── nangate45-install.json
+│       └── xls-install.json
 ├── src/
 │   ├── sv32/
 │   │   ├── sv32_execute.x       # Pure RV32I instruction semantics
 │   │   └── sv32_core.x          # Stateful DSLX core proc
 │   └── sv32_soc/                # Synthesizable ROM, RAM, and LED SoC
 ├── programs/
-│   └── blinky.py                # 13-instruction RV32I boot program
+│   ├── blinky.py                # 13-instruction RV32I boot program
+│   ├── blinky.c                 # Bare-metal C blinky compiled by RISC-V GCC
+│   ├── crt0.S                   # Reset entry, stack setup, and BSS clearing
+│   └── sv32.ld                  # 1 KiB ROM / 1 KiB RAM linker script
 ├── boards/
 │   └── de25_nano/               # Board wrapper, pin/timing constraints, clock IP recipe
 ├── tests/
@@ -49,21 +49,19 @@ xls-sv32/
 │   ├── sv32_soc/                # Memory, MMIO, blinky, and board-wrapper tests
 │   └── tools/
 │       ├── test_install_xls.py  # Offline installer recovery fixtures
-│       ├── test_nangate_install.py
-│       └── test_opensta_activity.py
+│       └── test_firmware.py     # C firmware memory-layout guards
 ├── scripts/
 │   ├── install-xls.sh           # Download/verify the pinned XLS release
 │   ├── build-sv32.py            # DSLX proc -> XLS IR -> complete clocked core
 │   ├── test-sv32.py             # DSLX/JIT tests plus RTL-vs-reference simulation
 │   ├── build-soc.py             # Core plus blinky ROM image
-│   ├── test-soc.py              # SoC RTL and synthesized-netlist checks
+│   ├── build-firmware.py        # RISC-V C/assembly -> ELF and ROM hex
+│   ├── test-soc.py              # SoC RTL, memory/MMIO, and board-wrapper checks
 │   ├── build-de25.py            # DE25-NANO Quartus project and 100 MHz build
 │   └── smoke-test.sh            # Toolchain smoke test
 ├── docs/
 │   ├── sv32.md                  # Interface, ISA coverage, and verification
-│   ├── soc.md                   # Memories, blinky, and DE25-NANO instructions
-│   ├── opensta.md               # Pinned analyzer and rebuild instructions
-│   └── yosys.md                 # Pinned synthesis flow
+│   └── soc.md                   # Memories, blinky, and DE25-NANO instructions
 ├── build/                       # Generated artifacts (ignored)
 │   └── sv32/
 │       ├── sv32.dslx.ir / sv32.ir / sv32.opt.ir
@@ -108,6 +106,16 @@ resolve from the project root:
     tests/sv32/sv32_test.x
 ```
 
+FPGA builds require Altera Quartus Prime Pro with Agilex 5 device support.
+Put `quartus_sh` on `PATH`; `build-de25.py` locates the accompanying Platform
+Designer tools from that installation. RTL simulation requires Icarus Verilog
+(`iverilog` and `vvp`).
+
+C firmware uses `riscv32-unknown-elf-gcc` and the matching binutils on `PATH`.
+They are installed under `/opt/riscv/bin` on this host. The build selects
+`-march=rv32i -mabi=ilp32` for the current core and supplies its own startup
+and linker script.
+
 ## Generate and test the core
 
 ```bash
@@ -146,7 +154,12 @@ Installer regression tests run offline in temporary projects:
 
 ```bash
 python3 -m unittest discover -s tests/tools -p 'test_install_xls.py' -v
-python3 -m unittest discover -s tests/tools -p 'test_nangate_install.py' -v
+```
+
+With the RISC-V compiler available, test the firmware linker guards with:
+
+```bash
+python3 -m unittest discover -s tests/tools -p 'test_firmware.py' -v
 ```
 
 ## Run the blinky SoC
@@ -157,15 +170,31 @@ RAM and toggles the LED every 0.5 seconds at 100 MHz.
 
 ```bash
 python3 scripts/build-soc.py              # Hardware ROM image and core
-python3 scripts/test-soc.py --synthesize  # Fast RTL, memory/MMIO, and gate tests
+python3 scripts/test-soc.py              # RTL, memory/MMIO, and board tests
 python3 scripts/build-de25.py --compile  # DE25-NANO Quartus build (100 MHz)
 ```
 
 The DE25-NANO project uses the board's 50 MHz oscillator, a generated 100 MHz
 PLL, configuration reset release, KEY0 reset, and active-low LED0. The Quartus
-project and `.sof` image are generated under `build/de25_nano/`. See
+project is generated under `build/de25_nano/`. Load
+`build/de25_nano/output_files/sv32_de25_nano.sof` with Quartus Programmer
+and the onboard USB-Blaster III. See
 [docs/soc.md](docs/soc.md) for the address map, waveform files, and programming
 instructions.
+
+To build and run the C version, use `--firmware c`. The existing Python
+instruction generator remains the default:
+
+```bash
+python3 scripts/build-firmware.py         # Standalone C ELF, binary, hex, and disassembly
+python3 scripts/test-soc.py --firmware c --output-dir build/sv32_soc_c_test
+python3 scripts/build-de25.py --firmware c --seed 2 --output-dir build/de25_nano_c --compile
+```
+
+The C programming image is `build/de25_nano_c/output_files/sv32_de25_nano.sof`.
+Its ROM startup initializes the stack and clears BSS before calling `main`.
+See [the C firmware notes](docs/soc.md#compiled-c-rom-firmware) for the current
+Harvard-memory limitations and bootloader requirements.
 
 ## The core as a DSLX proc
 
@@ -215,13 +244,9 @@ the memory model, and verification details.
 
 - `config/tools/xls-install.json` pins the XLS release URL, platform, size,
   and checksum.
-- `config/tools/opensta-install.json`, `yosys-install.json`, and
-  `nangate45-install.json` pin the optional synthesis and power-analysis
-  tools inherited from the original XLS test project. Their launchers
-  (`bin/sta`, `bin/yosys`) are ready to use; a RISC-V PPA script is a
-  future addition.
-- Icarus Verilog (`iverilog`/`vvp`) is required for RTL simulation. Verilator
-  and Yosys are useful for lint and synthesis.
+- Altera Quartus Prime Pro handles FPGA synthesis, fitting, timing analysis,
+  and `.sof` assembly through `scripts/build-de25.py --compile`.
+- Icarus Verilog (`iverilog`/`vvp`) is required for RTL simulation.
 
 Upstream references: [XLS installation](https://github.com/google/xls#install-latest-release),
 [XLS tool quick start](https://google.github.io/xls/tools_quick_start/), and
